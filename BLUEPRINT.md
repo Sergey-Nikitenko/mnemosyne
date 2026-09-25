@@ -1045,6 +1045,43 @@ Proven by `tests/golden/test_phase7_context_adapter.py` (determinism, purity,
 translation, isolation, and a second adapter producing a different representation
 from the same NCS).
 
+### Phase 7.5 — model handoff / continuity independence
+
+The property Phase 7 exists to prove: **a model change must not require transfer
+of the previous model's private context for Nexus continuity to survive.**
+
+    Session A -> Model A -> private context --X-- (must not cross)
+                         -> authoritative memory (events)
+                         -> NCS -> ContextAdapter -> ContextRequest -> Model B
+
+- **Reconstructive, not transmissive (AD-039).** Model B *reconstructs*
+  continuity from authoritative state; Model A never *transmits* it. The handoff
+  is the existing 7.1→7.2→7.3→7.4 pipeline re-run with a new `ModelIdentity`:
+  re-project the same event-sourced memory as-of, then adapt. Nothing new is
+  added — no router, no summarization, no transcript persistence, no second
+  continuity mechanism.
+- **The invariant holds at the handoff:** user and agent identity stay
+  byte-identical; only `ModelIdentity` changes (7.1), and memory the model
+  deliberately committed survives (7.2) through the projection (7.3) into the
+  target request (7.4).
+- **The previous model's private context is structurally absent.** Model B's
+  request is built from the NCS alone, so a session transcript, the old model's
+  response, and any un-persisted private thought cannot appear in it. The golden
+  test holds a `SECRET_A_ONLY` marker in Model A's context and asserts it stays
+  out of B's request.
+- **The proof stops at the model boundary.** Model B is a deterministic test
+  double that RECEIVES the `ContextRequest`; no LLM inference, provider, or
+  network is involved. Actual provider integration is a later concern.
+
+Proven by `tests/golden/test_phase7_handoff.py` (identity invariant, private-
+context isolation, persisted-state survival, determinism, reconstruction).
+
+**Phase 7 is complete** — 7.1 identity → 7.2 authoritative memory → 7.3 as-of
+continuity → 7.4 context adaptation → 7.5 model-independent handoff. Mnemosyne
+proves the central claim: Nexus owns identity, memory, knowledge, continuity, and
+state; models are pluggable reasoning backends, and continuity survives a model
+change without the previous model's private context.
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1106,6 +1143,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-036** — Memory is event-sourced: memory objects are projections of authoritative `memory.created` / `memory.updated` events, never directly mutable rows. A model (or any caller) can propose a change; only an event changes authoritative state. Versioning is explicit (v1 is never silently rewritten), and every record carries provenance back to its source event / run / task / session.
 - **AD-037** — Continuity is a projection, not a store: the ContinuityProjector reconstructs a `NexusContinuityState` (identity + event-sourced memory as of an explicit `as_of`) deterministically and read-only. It never mutates, never calls a model, and the NCS is model-neutral — a context adapter (7.4) translates it per model.
 - **AD-038** — Context adaptation is a translation boundary, not an orchestration layer: `ContextAdapter.adapt(ncs) -> ContextRequest` is a pure, deterministic function of (ncs, configuration) that turns a model-neutral NCS into a provider/model-specific request. It never retrieves or mutates memory, never decides identity or selects a model, never invokes a model or calls MCP, never touches a provider SDK or the event store, and never modifies the NCS. Provider vocabulary lives only in the request/adapter; the NCS stays model-neutral.
+- **AD-039** — A model change must not require transfer of the previous model's private context for Nexus continuity to survive: the handoff is reconstructive, not transmissive. Model B reconstructs continuity from authoritative state (re-project the event-sourced memory as-of with the new `ModelIdentity`, then adapt), never from Model A's messages, hidden state, prompt, transcript, or response. User/agent identity stay byte-identical; only `ModelIdentity` changes; and persisted memory reaches Model B through the same 7.3→7.4 pipeline.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1213,6 +1251,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Memory taxonomy contracts (7.2): event-sourced, versioned, provenanced; direct mutation cannot alter authoritative state | `tests/golden/test_phase7_memory.py` |
 | ContinuityProjector / NCS (7.3): deterministic as-of reconstruction, read-only, model-independent | `tests/golden/test_phase7_continuity.py` |
 | ContextAdapter boundary (7.4): deterministic, pure, faithful translation; provider vocabulary stays off the NCS | `tests/golden/test_phase7_context_adapter.py` |
+| Model handoff / continuity independence (7.5): reconstructive, not transmissive — Model A's private context never crosses | `tests/golden/test_phase7_handoff.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |
