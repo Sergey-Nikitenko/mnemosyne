@@ -302,6 +302,25 @@ class Preference(MemoryRecord):
 
 
 @dataclass
+class NexusContinuityState:
+    """The world as of a point in time — a model-neutral continuity bundle (AD-037).
+
+    A read-side PROJECTION of authoritative state (identity + event-sourced
+    memory), never a stored record. `as_of` names the point in time the world is
+    reconstructed to, so a new session can resume "what was in force then", not
+    merely "what is current now". Deterministic: the same inputs yield the same
+    bundle.
+    """
+    as_of: datetime = field(default_factory=utcnow)
+    user: UserIdentity = field(default_factory=UserIdentity)
+    agent: AgentIdentity = field(default_factory=AgentIdentity)
+    model: ModelIdentity = field(default_factory=ModelIdentity)
+    procedures: list[Procedure] = field(default_factory=list)
+    semantic_memories: list[SemanticMemory] = field(default_factory=list)
+    preferences: list[Preference] = field(default_factory=list)
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

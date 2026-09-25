@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 
 from core.contracts import Preference, Procedure, SemanticMemory, new_id, utcnow
 from core.events import EventType
@@ -35,24 +36,28 @@ class MemoryStore:
         self._conn.commit()
 
     def record(self, kind: str, memory_id: str, content: dict,
-               scope: str = "", provenance: dict | None = None):
+               scope: str = "", provenance: dict | None = None, now=None):
         """The ONLY write path: emit an authoritative memory event.
 
         Returns the projected record at its new version. `content` is the
-        kind-specific payload (name/steps/constraints for a procedure, ...)."""
+        kind-specific payload (name/steps/constraints for a procedure, ...).
+        `now` is injectable so tests can control the event's `emitted_at`."""
         current = self.get(kind, memory_id)
         version = (current.version + 1) if current is not None else 1
         event_type = EventType.MEMORY_UPDATED if current is not None else EventType.MEMORY_CREATED
         event_id = new_id("evt")
+        emitted = (now or utcnow()).isoformat()
+        created = current.created_at.isoformat() if current is not None else emitted
         payload = {
             "kind": kind, "memory_id": memory_id, "version": version,
             "scope": scope, "provenance": {"event_id": event_id, **(provenance or {})},
+            "created_at": created, "updated_at": emitted,
             **content,
         }
         self._conn.execute(
             "INSERT INTO memory_events (event_id, kind, memory_id, version, payload, emitted_at) "
             "VALUES (?,?,?,?,?,?)",
-            (event_id, kind, memory_id, version, json.dumps(payload), utcnow().isoformat()))
+            (event_id, kind, memory_id, version, json.dumps(payload), emitted))
         self._conn.commit()
         return self.get(kind, memory_id)
 
@@ -72,11 +77,30 @@ class MemoryStore:
             (kind, memory_id)).fetchall()
         return [self._project(kind, json.loads(r[0])) for r in rows]
 
+    def list_as_of(self, kind: str, as_of) -> list:
+        """Every record of a kind, each projected to its version in force at
+        `as_of` (the latest version whose event was emitted on or before it).
+        Deterministic: sorted by memory_id."""
+        rows = self._conn.execute(
+            "SELECT memory_id, payload FROM memory_events "
+            "WHERE kind=? AND emitted_at <= ? ORDER BY memory_id, version",
+            (kind, as_of.isoformat())).fetchall()
+        latest: dict[str, dict] = {}
+        for memory_id, payload_json in rows:
+            latest[memory_id] = json.loads(payload_json)
+        return [self._project(kind, latest[mid]) for mid in sorted(latest)]
+
+    @staticmethod
+    def _ts(value):
+        return datetime.fromisoformat(value) if value else utcnow()
+
     @staticmethod
     def _project(kind: str, payload: dict):
         base = dict(
             memory_id=payload["memory_id"], version=payload["version"],
-            scope=payload.get("scope", ""), provenance=payload.get("provenance", {}))
+            scope=payload.get("scope", ""), provenance=payload.get("provenance", {}),
+            created_at=MemoryStore._ts(payload.get("created_at")),
+            updated_at=MemoryStore._ts(payload.get("updated_at")))
         if kind == "procedure":
             return Procedure(name=payload.get("name", ""),
                              steps=payload.get("steps", []),

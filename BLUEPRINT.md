@@ -992,6 +992,28 @@ Proven by `tests/golden/test_phase7_memory.py` (the full invariant in one test:
 project → mutate-directly → authoritative state unchanged → legitimate update →
 new version → provenance + version history).
 
+### Phase 7.3 — ContinuityProjector / NCS
+
+Reconstruct the world as of a point in time — the first genuine proof of
+"new session ≠ new identity." `NexusContinuityState` is a read-side PROJECTION of
+authoritative state (identity + event-sourced memory), never a stored record:
+
+    authoritative state + explicit as_of -> ContinuityProjector -> NCS
+
+- **No new store, no model, no mutation** — the projector only reads. It is pure
+  and deterministic, so the same `as_of` yields the same NCS.
+- **`as_of` reconstruction** — memory is projected to its version *in force at the
+  given time*, not merely "latest". `Procedure v1 @ t1` vs `v2 @ t2` are
+  distinguishable, which is what later makes "what was in force when this ran"
+  answerable.
+- **Model-neutral** — the NCS carries Nexus contracts only; a context adapter
+  (7.4) will translate it, and the projector never knows which model receives it.
+- **Event-sourced timestamps** — `created_at`/`updated_at` ride the memory events,
+  so projection is deterministic (not fresh-per-call).
+
+Proven by `tests/golden/test_phase7_continuity.py` (as-of reconstruction,
+determinism, read-only, and a model swap leaving user/agent + memory unchanged).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1051,6 +1073,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-034** — An agent is a capability composition, not a new execution substrate: a stable logical identity (`agent`) plus a runtime, delegating through `parent_run_id`. Agent identity is never conflated with worker_id/task_id/run_id; a delegated agent cannot bypass policy; and each child run keeps its own identity and fingerprint.
 - **AD-035** — Identity and continuity are Nexus-owned, durable, and model-agnostic: `UserIdentity`, `AgentIdentity`, and `ModelIdentity` are stable, versionable contracts carried in the `RunManifest`; the model is a pluggable reasoning backend that instantiates (never owns) state. A model swap changes only `ModelIdentity` — user and agent identity are untouched — and `ModelIdentity` equality is on logical fields only, never the provider config (API key, endpoint, SDK object, client).
 - **AD-036** — Memory is event-sourced: memory objects are projections of authoritative `memory.created` / `memory.updated` events, never directly mutable rows. A model (or any caller) can propose a change; only an event changes authoritative state. Versioning is explicit (v1 is never silently rewritten), and every record carries provenance back to its source event / run / task / session.
+- **AD-037** — Continuity is a projection, not a store: the ContinuityProjector reconstructs a `NexusContinuityState` (identity + event-sourced memory as of an explicit `as_of`) deterministically and read-only. It never mutates, never calls a model, and the NCS is model-neutral — a context adapter (7.4) translates it per model.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1156,6 +1179,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Multi-agent composition (6.6): explicit agent identity + durable delegation, policy preserved, child outcomes compositional | `tests/golden/test_phase6_multiagent.py` |
 | Identity contracts (7.1): User/Agent/Model identities persisted in the manifest; a model swap changes only ModelIdentity | `tests/golden/test_phase7_identity.py` |
 | Memory taxonomy contracts (7.2): event-sourced, versioned, provenanced; direct mutation cannot alter authoritative state | `tests/golden/test_phase7_memory.py` |
+| ContinuityProjector / NCS (7.3): deterministic as-of reconstruction, read-only, model-independent | `tests/golden/test_phase7_continuity.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |
