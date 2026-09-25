@@ -262,6 +262,46 @@ class Episode:
 
 
 @dataclass
+class MemoryRecord:
+    """Common envelope for durable, event-sourced memory (AD-036).
+
+    A memory record is a PROJECTION of authoritative memory events — it is never
+    a directly mutable row. The model (or any caller) can propose a change; only
+    a memory event changes authoritative state. Carries a stable identity, an
+    explicit version, provenance back to its source event, and a lifecycle."""
+    memory_id: str = ""
+    version: int = 1
+    created_at: datetime = field(default_factory=utcnow)
+    updated_at: datetime = field(default_factory=utcnow)
+    status: str = "active"            # active | superseded | retired
+    scope: str = ""                   # ownership: user_id / agent_id / project_id
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Procedure(MemoryRecord):
+    """Procedural memory — "how do we do this?" (a durable, versioned workflow)."""
+    name: str = ""
+    steps: list[str] = field(default_factory=list)
+    constraints: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SemanticMemory(MemoryRecord):
+    """Semantic memory — "what stable fact do we know?" (subject/predicate/object)."""
+    subject: str = ""
+    predicate: str = ""
+    object: str = ""
+
+
+@dataclass
+class Preference(MemoryRecord):
+    """Preference memory — what the user or agent prefers."""
+    key: str = ""
+    value: str = ""
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

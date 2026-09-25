@@ -65,24 +65,27 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (53 golden + conformance tests)
+# Run the entire suite (54 golden + conformance tests)
 python scripts/check.py
 ```
 
 ```bash
 python tests/golden/test_phase7_identity.py   # the model-swap invariant
+python tests/golden/test_phase7_memory.py     # event-sourced memory taxonomy
 ```
 
 ---
 
 ## Status
 
-**Phase 7.1 complete.** The three identity contracts are frozen in the `RunManifest`,
-the model-swap invariant is proven, and the framework underneath remains untouched
-(Phases 0–6 are documented in [`BLUEPRINT.md`](BLUEPRINT.md)).
+**Phase 7.2 complete.** Identity (7.1) and the memory taxonomy (7.2) are frozen:
+`UserIdentity` / `AgentIdentity` / `ModelIdentity`, plus event-sourced
+`Procedure` / `SemanticMemory` / `Preference` — versioned, provenanced, and never
+directly mutable by a model (Phases 0–6 are the Nexus framework, documented in
+[`BLUEPRINT.md`](BLUEPRINT.md)).
 
-Next on the arc: continuity projection (7.2), per-model context adapters (7.3),
-model routing (7.4), and memory deepening (7.5).
+Next on the arc: the ContinuityProjector (7.3), per-model context adapters, and
+model routing.
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

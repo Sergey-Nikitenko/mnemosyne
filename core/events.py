@@ -40,6 +40,8 @@ class EventType(str):
     APPROVAL_GRANTED = "approval.granted"
     APPROVAL_DENIED = "approval.denied"
     APPROVAL_CONSUMED = "approval.consumed"
+    MEMORY_CREATED = "memory.created"
+    MEMORY_UPDATED = "memory.updated"
     EVALUATION_COMPLETED = "evaluation.completed"
     RUN_REPLANNED = "run.replanned"
     RUN_COMPLETED = "run.completed"
