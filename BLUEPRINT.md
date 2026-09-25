@@ -1014,6 +1014,37 @@ authoritative state (identity + event-sourced memory), never a stored record:
 Proven by `tests/golden/test_phase7_continuity.py` (as-of reconstruction,
 determinism, read-only, and a model swap leaving user/agent + memory unchanged).
 
+### Phase 7.4 — ContextAdapter (the translation boundary)
+
+Translate the model-neutral NCS into a provider/model-specific request without
+letting provider concerns leak backward into Mnemosyne:
+
+    NCS (model-neutral) -> ContextAdapter -> ContextRequest (provider/model-specific)
+
+- **The adapter is a translation boundary, not an orchestration layer (AD-038).**
+  `ContextAdapter.adapt(ncs) -> ContextRequest` is a pure, deterministic function
+  of (ncs, configuration). It translates identity, procedures, semantic memories,
+  preferences, and the as-of stamp into a target model's request shape.
+- **Provider vocabulary stays on the far side.** The reference
+  `OpenAIContextAdapter` (`core/context.py`) understands OpenAI's request
+  VOCABULARY (a `messages` list with `role`/`content`, a `temperature`) but not
+  its SDK or execution. A local-model adapter can emit a completely different
+  shape (one raw `prompt`) from the same NCS.
+- **The must-not list is structural.** The adapter never retrieves or mutates
+  memory, never accesses a MemoryStore, never decides identity or selects a model,
+  never invokes a model, never calls MCP, never touches a provider SDK or the
+  event store, and never modifies the NCS. `core/context.py` is stdlib-only — the
+  layer-boundary and provider-leakage gates hold it there — and the adapter's only
+  dependency is its explicit, frozen configuration.
+- **One continuity representation; many model representations.** The golden test
+  adapts the SAME NCS through two adapters (OpenAI-flavored + local-model-flavored)
+  and asserts the two requests differ in shape while the NCS is unchanged and
+  provider vocabulary never appears in it.
+
+Proven by `tests/golden/test_phase7_context_adapter.py` (determinism, purity,
+translation, isolation, and a second adapter producing a different representation
+from the same NCS).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1074,6 +1105,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-035** — Identity and continuity are Nexus-owned, durable, and model-agnostic: `UserIdentity`, `AgentIdentity`, and `ModelIdentity` are stable, versionable contracts carried in the `RunManifest`; the model is a pluggable reasoning backend that instantiates (never owns) state. A model swap changes only `ModelIdentity` — user and agent identity are untouched — and `ModelIdentity` equality is on logical fields only, never the provider config (API key, endpoint, SDK object, client).
 - **AD-036** — Memory is event-sourced: memory objects are projections of authoritative `memory.created` / `memory.updated` events, never directly mutable rows. A model (or any caller) can propose a change; only an event changes authoritative state. Versioning is explicit (v1 is never silently rewritten), and every record carries provenance back to its source event / run / task / session.
 - **AD-037** — Continuity is a projection, not a store: the ContinuityProjector reconstructs a `NexusContinuityState` (identity + event-sourced memory as of an explicit `as_of`) deterministically and read-only. It never mutates, never calls a model, and the NCS is model-neutral — a context adapter (7.4) translates it per model.
+- **AD-038** — Context adaptation is a translation boundary, not an orchestration layer: `ContextAdapter.adapt(ncs) -> ContextRequest` is a pure, deterministic function of (ncs, configuration) that turns a model-neutral NCS into a provider/model-specific request. It never retrieves or mutates memory, never decides identity or selects a model, never invokes a model or calls MCP, never touches a provider SDK or the event store, and never modifies the NCS. Provider vocabulary lives only in the request/adapter; the NCS stays model-neutral.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1180,6 +1212,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Identity contracts (7.1): User/Agent/Model identities persisted in the manifest; a model swap changes only ModelIdentity | `tests/golden/test_phase7_identity.py` |
 | Memory taxonomy contracts (7.2): event-sourced, versioned, provenanced; direct mutation cannot alter authoritative state | `tests/golden/test_phase7_memory.py` |
 | ContinuityProjector / NCS (7.3): deterministic as-of reconstruction, read-only, model-independent | `tests/golden/test_phase7_continuity.py` |
+| ContextAdapter boundary (7.4): deterministic, pure, faithful translation; provider vocabulary stays off the NCS | `tests/golden/test_phase7_context_adapter.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

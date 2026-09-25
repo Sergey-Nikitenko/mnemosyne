@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (55 golden + conformance tests)
+# Run the entire suite (56 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -73,21 +73,23 @@ python scripts/check.py
 python tests/golden/test_phase7_identity.py   # the model-swap invariant
 python tests/golden/test_phase7_memory.py     # event-sourced memory taxonomy
 python tests/golden/test_phase7_continuity.py # as-of continuity projection
+python tests/golden/test_phase7_context_adapter.py  # the NCS -> request translation boundary
 ```
 
 ---
 
 ## Status
 
-**Phase 7.3 complete.** Identity (7.1), memory (7.2), and continuity (7.3) are
-frozen: `UserIdentity` / `AgentIdentity` / `ModelIdentity`, event-sourced
-`Procedure` / `SemanticMemory` / `Preference`, and a `ContinuityProjector` that
-reconstructs the world as of a point in time — deterministically, read-only, and
-model-independent (Phases 0–6 are the Nexus framework, documented in
+**Phase 7.4 complete.** Identity (7.1), memory (7.2), continuity (7.3), and context
+adaptation (7.4) are frozen: `UserIdentity` / `AgentIdentity` / `ModelIdentity`,
+event-sourced `Procedure` / `SemanticMemory` / `Preference`, a `ContinuityProjector`
+that reconstructs the world as of a point in time, and a `ContextAdapter` that
+translates that model-neutral continuity state into a provider/model-specific
+request — deterministically, read-only, and without provider vocabulary leaking
+backward (Phases 0–6 are the Nexus framework, documented in
 [`BLUEPRINT.md`](BLUEPRINT.md)).
 
-Next on the arc: context adapters (7.4), the session/model-swap golden test (7.5),
-and the Phase 7 freeze.
+Next on the arc: the session/model-swap golden test (7.5) and the Phase 7 freeze.
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

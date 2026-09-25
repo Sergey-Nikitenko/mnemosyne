@@ -320,6 +320,40 @@ class NexusContinuityState:
     preferences: list[Preference] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ContextRequest:
+    """The provider/model-specific request a ContextAdapter produces (AD-038).
+
+    The acceptance bar calls this "ModelRequest"; in code the name `ModelRequest`
+    is already the execution-plane request (Phase 3.3), so the adapter's output
+    is named `ContextRequest` to keep the two boundaries unambiguous.
+
+    `provider` + `body` carry the provider-specific vocabulary ("messages",
+    "temperature", "tools" for an OpenAI-flavored adapter; "prompt",
+    "max_new_tokens" for a local-model adapter). That vocabulary exists ONLY here
+    and in the adapter — never in the NexusContinuityState, which stays
+    model-neutral. `model` is the target model key, translated (not selected)
+    from the NCS's ModelIdentity.
+    """
+    provider: str                    # adapter-declared family: "openai" / "local" / ...
+    model: str                       # target model key, translated from NCS.model
+    body: dict[str, Any] = field(default_factory=dict)  # provider-specific payload
+
+
+class ContextAdapter(Protocol):
+    """The translation boundary: model-neutral NCS -> model-specific request.
+
+    A ContextAdapter is a pure function of (ncs, configuration): it translates
+    continuity into a provider/model-specific ContextRequest and returns it. It
+    must NOT retrieve or mutate memory, access a MemoryStore, decide identity,
+    select a model, invoke a model, call MCP, touch a provider SDK or the event
+    store, or modify the NCS. The same NCS + the same adapter configuration
+    always yields the same request.
+    """
+
+    def adapt(self, ncs: NexusContinuityState) -> ContextRequest: ...
+
+
 @dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
