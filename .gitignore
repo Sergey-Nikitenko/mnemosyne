@@ -1,7 +1,8 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 .venv/
 .env
 .pytest_cache/
 
 TALKING_POINTS.md
+EXPANSION.md
