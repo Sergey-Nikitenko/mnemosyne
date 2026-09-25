@@ -355,6 +355,57 @@ class ContextAdapter(Protocol):
 
 
 @dataclass
+class Capability:
+    """A declared capability — an agency-level operation Nexus may perform (AD-040).
+
+    Distinct from the execution-layer `ToolSpec`: a Capability is what a MODEL
+    proposes by name; Nexus owns whether and how it executes. `risk` feeds the
+    static policy gate; `parameters` is the declared surface."""
+    name: str
+    description: str = ""
+    risk: Risk = Risk.READ
+    parameters: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ActionRequest:
+    """A model's PROPOSAL to invoke a capability (AD-040).
+
+    The model proposes; it never authorizes. `requested_by` is the agent ROLE
+    (which survives model replacement — the model is only the backend). `claims`
+    is carried but ignored by the authority: a model cannot assert its way into
+    permission. `scope` is the project/domain the action targets."""
+    capability: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    requested_by: AgentIdentity = field(default_factory=AgentIdentity)
+    scope: str = ""
+    claims: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ActionVerdict:
+    """The authority's answer to an ActionRequest (AD-040).
+
+    `verdict` reuses PolicyVerdict (ALLOW / DENY / APPROVAL_REQUIRED); `reasons`
+    records WHY — the static risk class plus any continuity refinement. The
+    authority returns this and causes nothing."""
+    verdict: PolicyVerdict
+    reasons: list[str] = field(default_factory=list)
+
+
+class Authority(Protocol):
+    """The authority boundary: (ActionRequest, NCS) -> ActionVerdict (AD-040).
+
+    A pure, deterministic, model-independent, continuity-aware decision. It must
+    never execute, never emit, never read the proposing model's identity, and
+    never honor the model's self-assertions — only (proposal, continuity state,
+    policy) are inputs.
+    """
+
+    def evaluate(self, action: ActionRequest, ncs: NexusContinuityState) -> ActionVerdict: ...
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

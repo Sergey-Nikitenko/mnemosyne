@@ -1082,6 +1082,44 @@ proves the central claim: Nexus owns identity, memory, knowledge, continuity, an
 state; models are pluggable reasoning backends, and continuity survives a model
 change without the previous model's private context.
 
+### Phase 8 — capability / agency plane
+
+Phase 7 proved Mnemosyne can *remember*; Phase 8 asks what it can *do* with that
+persistent state. The boundary is authority: a model proposes an operation, and
+Nexus — not the model — is the authority that validates it. The novelty over the
+Nexus execution plane is that the authority is now **continuity-aware** (it reads
+the NCS) and **model-independent** (a model swap never changes a verdict).
+
+### Phase 8.1 — capability contracts + the continuity-aware authority
+
+Define the agency-level contracts and the authority boundary (AD-040):
+
+    model -> ActionRequest -> Authority(action, NCS) -> ActionVerdict
+
+- **The model proposes; the authority decides.** `Capability` (a declared
+  operation + risk), `ActionRequest` (the proposal: capability + parameters +
+  agent role + scope), and `ActionVerdict` (allow/deny/approval + reasons) are
+  the contracts; the model only ever emits an `ActionRequest`.
+- **Model-independent authority.** `ContinuityAuthority` (`control/authority.py`)
+  never reads `ncs.model`, so the same proposal with the same NCS (modulo the
+  proposing model) yields the identical verdict — the Phase 7 invariant, extended
+  from memory to action.
+- **Continuity-aware.** The authority composes the existing static policy gate
+  (risk + allow/denylist, via `PolicyEngine`) with the durable NCS: a Preference
+  (`capability.<name>`, scoped to the action's `scope`) overrides the risk
+  verdict. The same proposal yields APPROVAL_REQUIRED / DENY / ALLOW as the
+  durable state changes — driven by the world, not the model.
+- **Decision ≠ Action, structurally.** The authority lives in `control/`, so the
+  existing control-plane purity gate (`test_control_plane_purity.py`) enforces
+  that it never executes, never emits, and never implements the Executor.
+- **No self-authorization; static DENY is final.** The model's `claims` are never
+  read, and continuity never softens a destructive/denylist DENY — the reflex arc
+  stays authoritative.
+
+Proven by `tests/golden/test_phase8_capability.py` (contract, model-independence,
+continuity-awareness, scope-awareness, no self-authorization, DENY-final, purity).
+The proof stops at the verdict — no execution, no autonomy.
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1144,6 +1182,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-037** — Continuity is a projection, not a store: the ContinuityProjector reconstructs a `NexusContinuityState` (identity + event-sourced memory as of an explicit `as_of`) deterministically and read-only. It never mutates, never calls a model, and the NCS is model-neutral — a context adapter (7.4) translates it per model.
 - **AD-038** — Context adaptation is a translation boundary, not an orchestration layer: `ContextAdapter.adapt(ncs) -> ContextRequest` is a pure, deterministic function of (ncs, configuration) that turns a model-neutral NCS into a provider/model-specific request. It never retrieves or mutates memory, never decides identity or selects a model, never invokes a model or calls MCP, never touches a provider SDK or the event store, and never modifies the NCS. Provider vocabulary lives only in the request/adapter; the NCS stays model-neutral.
 - **AD-039** — A model change must not require transfer of the previous model's private context for Nexus continuity to survive: the handoff is reconstructive, not transmissive. Model B reconstructs continuity from authoritative state (re-project the event-sourced memory as-of with the new `ModelIdentity`, then adapt), never from Model A's messages, hidden state, prompt, transcript, or response. User/agent identity stay byte-identical; only `ModelIdentity` changes; and persisted memory reaches Model B through the same 7.3→7.4 pipeline.
+- **AD-040** — The authority that validates a proposed action is a pure, model-independent, continuity-aware function of (proposal, NCS, policy): `Authority.evaluate(action, ncs) -> ActionVerdict`. The model proposes; the authority decides; the executor executes; events record. The verdict never reads the proposing model's identity, reads durable continuity (preferences scoped to the action) to refine the static risk gate, ignores the model's self-assertions, and never executes or emits. Static DENY (destructive/denylist) is final — continuity refines, never overrides the reflex arc.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1252,6 +1291,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | ContinuityProjector / NCS (7.3): deterministic as-of reconstruction, read-only, model-independent | `tests/golden/test_phase7_continuity.py` |
 | ContextAdapter boundary (7.4): deterministic, pure, faithful translation; provider vocabulary stays off the NCS | `tests/golden/test_phase7_context_adapter.py` |
 | Model handoff / continuity independence (7.5): reconstructive, not transmissive — Model A's private context never crosses | `tests/golden/test_phase7_handoff.py` |
+| Capability/authority boundary (8.1): model proposes; a model-independent, continuity-aware authority decides | `tests/golden/test_phase8_capability.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |
