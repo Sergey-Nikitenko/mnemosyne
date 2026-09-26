@@ -48,6 +48,14 @@ LearningAuthority, DelegationRequest → independent authorities — and it carr
 Aurora's refinement: a proposer must never be the only witness to its own
 decisions.
 
+## The project-wide law
+
+With Phases 0–10 frozen, one law summarizes the invariants every phase enforces:
+
+> **Proposal before authority. Authority before mutation. Report before
+> observation. Freshness at the write boundary. History is never rewritten. New
+> capability comes from composing frozen guarantees, not bypassing them.**
+
 ## Control plane vs execution plane (the distinction that matters)
 
 The directory split (`control/` vs `execution/`) is secondary. The rule is:
