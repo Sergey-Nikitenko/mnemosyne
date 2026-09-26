@@ -56,6 +56,15 @@ With Phases 0–10 frozen, one law summarizes the invariants every phase enforce
 > observation. Freshness at the write boundary. History is never rewritten. New
 > capability comes from composing frozen guarantees, not bypassing them.**
 
+## The phase gate
+
+A new phase begins only when a concrete requirement asks a question that no
+composition of frozen guarantees can answer — and answering it requires a new
+architectural invariant with a testable acceptance bar, not merely another
+implementation of an existing contract. In one line:
+
+> **If composition can answer the question, don't invent a phase.**
+
 ## Control plane vs execution plane (the distinction that matters)
 
 The directory split (`control/` vs `execution/`) is secondary. The rule is:
