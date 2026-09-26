@@ -790,6 +790,33 @@ correctness, plumbing-never-authority, frozen paths remaining mandatory, durable
 reconstruction, config-driven model swap, one idempotent close(), console
 coherence, and the AD-050 negative assertion through close()/rebuild.*
 
+### Phase 4.10 — the supported serve surface (`mnemosyne serve`)
+
+The composition root made `mnemosyne serve` a non-problem: the CLI no longer
+solves architecture, it exposes an already-supported lifecycle.
+
+    mnemosyne serve -> CLI args -> MnemosyneConfig -> CompositionRoot.build(config)
+                    -> system.console_app -> HTTP/WebSocket server -> (shutdown) -> system.close()
+
+- **A lifecycle surface, not a runtime or authority layer.** `apps/serve.py`
+  translates explicit operator configuration into `MnemosyneConfig` (one flag per
+  required field — configuration stays primitive, no TOML/init yet), delegates
+  construction to `CompositionRoot`, serves the EXISTING `console_app`, and
+  guarantees closure via `finally`.
+- **Thin translation.** `build_config` returns configuration, never components;
+  the CLI instantiates no store/authority/runner/projector/learning/federation
+  object.
+- **Exactly one build, exactly one close.** Normal and exceptional shutdown both
+  reach the single `system.close()` in `finally`.
+- **Deletable by construction.** Deleting `apps/serve.py` removes no authorization,
+  reconstruction, identity, memory, or lifecycle semantic.
+
+**Phase 4.10 acceptance:** *`tests/conformance/test_serve_surface.py` proves a
+single supported entry point (`python -m apps.serve --help`), thin 1:1
+CLI→config translation, exactly one build/close, existing-console-only serving,
+config-driven model swap, no startup side effects, closure on exceptional
+shutdown, and AD-050 through the serve lifecycle.*
+
 ### Phase 5 — Hardening
 
 **Headline guarantee:** *Nexus guarantees atomic authorization and ownership
@@ -1696,6 +1723,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | CLI: thin surface adapter — same async ask + same projected views as REST/WS/dashboard | `tests/golden/test_phase4_cli.py` |
 | Operator Console: projection-only — identities/NCS/approvals/events/action-lifecycle read-only; interrupted action is attempted/unknown, never failed; REST/CLI/raw state agree | `tests/conformance/test_console_surface.py` |
 | Supported composition root (4.9): config constructs the canonical topology; config ≠ composition; shared-state correctness; plumbing-never-authority; frozen paths; reconstruction; model swap; one idempotent close; console coherence; AD-050 through close | `tests/golden/test_phase4_composition.py` |
+| Supported serve surface (4.10): one entry point + help; thin CLI→config translation; exactly one build/close; existing-console-only; config-driven model swap; no startup side effects; closure on exceptional shutdown; AD-050 through serve | `tests/conformance/test_serve_surface.py` |
 | Atomic approval consumption: two workers race, exactly one executes (single-use) | `tests/golden/test_phase5_concurrency.py` |
 | Hardening: per-call tool identity, event-sourced approval, terminal step semantics, atomic recovery, dead-event cleanup | `tests/golden/test_phase5_hardening.py` |
 | Per-worker connections + deliberate SQLite policy (5.2): one connection per thread, busy_timeout/WAL, concurrent independent work | `tests/golden/test_phase5_connections.py` |

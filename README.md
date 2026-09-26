@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (70 golden + conformance tests)
+# Run the entire suite (71 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -85,6 +85,32 @@ python tests/golden/test_phase10_federation_peer.py    # federation identity: re
 python tests/golden/test_phase10_delegation.py         # federated delegation: a bounded request, never authority
 python tests/golden/test_phase10_federated_outcome.py   # federated outcome: A records "B reported X", never "A observed X"
 ```
+
+### Serve the Operator Console
+
+One supported command launches and owns the whole system — no Python imports, no
+hand-wired components:
+
+```bash
+python -m apps.serve serve \
+    --workspace ./workspace \
+    --user-id alice \
+    --agent-id mnemosyne \
+    --model-id fake
+```
+
+1. This builds the canonical system from explicit configuration and serves the
+   Operator Console at `http://127.0.0.1:8000`.
+2. Open `http://127.0.0.1:8000` to inspect identities, NCS, approvals, events, and
+   action lifecycles.
+3. **Ctrl+C** stops the server and closes every store it owns (no terminal event
+   is fabricated).
+4. Run the **same command** again to reconstruct the same authoritative workspace.
+5. `python -m apps.serve --help` lists every flag a new operator needs.
+
+The serve command is a disposable lifecycle surface — it translates configuration
+into `MnemosyneConfig`, delegates construction to the composition root, and serves
+the existing console. Deleting it changes no Mnemosyne semantic.
 
 ---
 
