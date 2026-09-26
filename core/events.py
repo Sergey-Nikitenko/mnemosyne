@@ -46,7 +46,10 @@ class EventType(str):
     RUN_REPLANNED = "run.replanned"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
-    # Phase 8 (agency): an allowed action's terminal outcomes.
+    # Phase 8 (agency): an authorized logical action's lifecycle. requested is
+    # emitted BEFORE the side effect can occur (AD-050); the terminal events
+    # record only observed completion or failure.
+    ACTION_REQUESTED = "action.requested"
     ACTION_COMPLETED = "action.completed"
     ACTION_FAILED = "action.failed"
     # Phase 10 (federation): A's authoritative receipt of B's reported outcome.

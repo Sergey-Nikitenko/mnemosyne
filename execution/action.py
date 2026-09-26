@@ -53,6 +53,26 @@ class ActionRunner:
                 found = ev
         return found
 
+    def _emit_requested(self, action: ActionRequest, action_id: str,
+                        run_id: str, task_id: str) -> None:
+        """Record the attempt durably BEFORE the Executor may cause a side effect."""
+        self.bus.publish(Event(
+            event_id=new_id("evt"),
+            event_type=EventType.ACTION_REQUESTED,
+            timestamp=utcnow(),
+            run_id=run_id,
+            task_id=task_id,
+            component="action",
+            status="running",
+            payload={
+                "action_id": action_id,
+                "capability": action.capability,
+                "parameters": dict(action.parameters),
+                "scope": action.scope,
+                "requested_by": action.requested_by.key,
+            },
+        ))
+
     def run(self, action: ActionRequest, ncs, *, run_id: str = "",
             task_id: str = "") -> ActionResult | None:
         action_id = action.action_id or new_id("act")
@@ -63,8 +83,10 @@ class ActionRunner:
         verdict = self.authority.evaluate(action, ncs)
         if verdict.verdict != PolicyVerdict.ALLOW:
             # DENY / APPROVAL_REQUIRED: the verdict is authoritative — no execution,
-            # no terminal event.
+            # no terminal event, and no action.requested.
             return None
+        # the attempt is durably recorded BEFORE the side effect can occur (AD-050)
+        self._emit_requested(action, action_id, run_id, task_id)
         tool_result = self.executor.execute_tool(
             ToolCall(tool_name=action.capability, arguments=dict(action.parameters)))
         now = utcnow()

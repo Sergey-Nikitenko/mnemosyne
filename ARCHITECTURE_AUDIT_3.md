@@ -28,7 +28,7 @@ is deliberately separated from "architecture defect."
 
 | ID | Class | Sev | Summary | Status |
 |---|---|---|---|---|
-| COMP-1 | composition | P1 | `ActionRunner` executes through the raw Executor, not `InstrumentedExecutor` — the agency path emits no `action.requested` before execution, so a crashed action is observably invisible (AD-009 dropped for Phase 8) | OPEN |
+| COMP-1 | composition | P1 | `ActionRunner` executes through the raw Executor, not `InstrumentedExecutor` — the agency path emits no `action.requested` before execution, so a crashed action is observably invisible (AD-009 dropped for Phase 8) | **RESOLVED** (8.x) |
 | TIME-1 | temporal | P3 | `MemoryRecord.status` ("retired") exists but nothing sets, honors, or filters on it — retirement is a mechanism gap | OPEN (dormant) |
 | EVENT-1 | event | P3 | `MODEL_SELECTED` is documented "reserved, not yet emitted" but is emitted in the runtime/router path; `MODEL_FALLBACK` is genuinely reserved | OPEN (minor) |
 | COMP-2 | composition | P3 | learning evidence does not distinguish a logical action (`action_id`) from a physical retry (`call_id`) — latent amplification risk if learning ever auto-collects outcomes | OPEN (latent) |
@@ -311,10 +311,13 @@ From code and tests, Audit #3 can defend:
 > domains, and composing frozen guarantees does not create a bypass unavailable
 > within any individual phase.**
 
-The composition question is answered in the affirmative, with one exception
-(COMP-1: the agency path drops AD-009's "event before complete" instrumentation).
-That exception is a contained hardening fix, not an architectural flaw in the
-composition model itself.
+The composition question is answered in the affirmative. COMP-1 (the agency path
+dropped AD-009's "event before complete" instrumentation) is **RESOLVED** by the
+8.x observable-action-attempt slice: `ActionRunner` now emits `action.requested`
+before the side effect, `reconstruct_action` returns `None` (never "failed") for
+an attempt with no terminal event, and federation inherits the guarantee with no
+special patch. The slice also exposed and fixed a latent bug — `reconstruct_action`'s
+"no terminal" fallback previously constructed a broken `ActionResult`.
 
 The second question — *what important question remains that no composition of
 0–10 can answer?* — has one honest candidate: **memory effectiveness** (is

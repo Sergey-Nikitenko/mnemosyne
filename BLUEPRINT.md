@@ -1492,6 +1492,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-047** — Federation begins with independent authority domains: a remote Nexus may declare identity, compatibility, and capability claims, but those declarations never become local authority or shared state; only explicitly bounded information crosses the federation boundary.
 - **AD-048** — Delegation transfers a bounded request, never authority: the requesting Nexus must authorize sending it, the receiving Nexus independently decides whether to accept it, and neither peer's claims, permissions, or identities confer authority inside the other domain.
 - **AD-049** — A federated outcome is an authoritative record of what a peer reported, not a promotion of the peer's execution into local fact: the executing Nexus owns its action and history, the receiving Nexus owns only the durable receipt, duplicate reports are idempotent, conflicting reports never rewrite history, and remote output confers no local authority or mutation.
+- **AD-050** — An authorized logical action becomes an observable attempt before execution begins: `action.requested` is durably recorded before the Executor may cause a side effect, terminal events record only observed completion or failure, and the absence of a terminal event remains an unknown outcome rather than a failure verdict.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 

@@ -107,18 +107,18 @@ class ApprovalState:
         return state
 
 
-def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult:
+def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult | None:
     """Project an action's terminal outcome from its authoritative event
-    (action.completed or action.failed). Deterministic: the same events yield the
-    same ActionResult. Returns an empty (success=False) result if no terminal
-    event exists."""
+    (action.completed or action.failed). Returns None if no terminal event exists
+    — a request with no terminal is "attempted / unknown" (see action_attempted),
+    never a failure verdict."""
     match = None
     for ev in events:
         if ev.event_type in ("action.completed", "action.failed") \
                 and ev.payload.get("action_id") == action_id:
             match = ev
     if match is None:
-        return ActionResult(action_id=action_id, success=False)
+        return None
     return ActionResult(
         action_id=action_id,
         capability=match.payload.get("capability", ""),
@@ -132,6 +132,14 @@ def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult:
         task_id=match.task_id,
         completed_at=match.timestamp.isoformat(),
     )
+
+
+def action_attempted(action_id: str, events: list[Event]) -> bool:
+    """Was an authorized attempt recorded for this logical action? A
+    `action.requested` event exists — whether or not a terminal event followed
+    (so a crash is observably "attempted", never "failed" nor invisible)."""
+    return any(ev.event_type == "action.requested"
+               and ev.payload.get("action_id") == action_id for ev in events)
 
 
 def reconstruct_federated_outcome(delegation_id: str,

@@ -29,7 +29,7 @@ from core.contracts import (  # noqa: E402
     ModelResponse, Risk, ToolResult, UserIdentity, utcnow,
 )
 from core.events import EventBus  # noqa: E402
-from core.state import reconstruct_action  # noqa: E402
+from core.state import action_attempted, reconstruct_action  # noqa: E402
 from control.authority import ContinuityAuthority  # noqa: E402
 from execution.action import ActionRunner  # noqa: E402
 from execution.fake import FakeExecutor  # noqa: E402
@@ -70,6 +70,31 @@ class FailingExecutor:
 
     def run_model(self, request):
         return ModelResponse(model="fake", content="", success=True)
+
+
+class ObservingExecutor:
+    """Asserts action.requested is durably observable when execute() is entered."""
+
+    def __init__(self, bus):
+        self.bus = bus
+        self.saw_requested = False
+
+    def execute_tool(self, call):
+        self.saw_requested = any(e.event_type == "action.requested" for e in self.bus.history)
+        return ToolResult(tool_call=call, success=True, output={"ok": True})
+
+    def run_model(self, request):
+        return ModelResponse(model="fake", content="", success=True)
+
+
+class CrashingExecutor:
+    """Simulates an interruption after the requested event, before the terminal."""
+
+    def execute_tool(self, call):
+        raise RuntimeError("crash mid-action")
+
+    def run_model(self, request):
+        raise RuntimeError("crash mid-action")
 
 
 def make_ncs(user, agent, model, preferences=()):
@@ -151,6 +176,65 @@ def main():
     check(fail_executor.calls == 1, "a failed action is NOT auto-retried")
     check(result_f2 == result_f1,
           "retrying a failed action returns the existing authoritative failure")
+
+    # --- 8.x observable action attempt (AD-050) -------------------------------
+    # 1. event-before-side-effect
+    obs_bus = EventBus()
+    obs_exec = ObservingExecutor(obs_bus)
+    obs_runner = ActionRunner(authority, obs_exec, obs_bus)
+    obs_runner.run(ActionRequest(action_id="action-obs", capability="create_book",
+                                 scope="project/xyz", requested_by=agent), ncs)
+    check(obs_exec.saw_requested,
+          "event-before-side-effect: action.requested is observable when execute() runs")
+
+    # 2. terminal ordering: requested precedes the terminal event
+    order = [e.event_type for e in bus.history]
+    check(order.index("action.requested") < order.index("action.completed"),
+          "success: action.requested precedes action.completed")
+    forder = [e.event_type for e in fail_bus.history]
+    check(forder.index("action.requested") < forder.index("action.failed"),
+          "failure: action.requested precedes action.failed")
+
+    # 3. crash visibility: attempted, never "failed", never invisible
+    crash_bus = EventBus()
+    crash_runner = ActionRunner(authority, CrashingExecutor(), crash_bus)
+    try:
+        crash_runner.run(ActionRequest(action_id="action-crash", capability="create_book",
+                                       scope="project/xyz", requested_by=agent), ncs)
+    except RuntimeError:
+        pass
+    check(len([e for e in crash_bus.history if e.event_type == "action.requested"]) == 1,
+          "crash: exactly one action.requested is retained")
+    check(len([e for e in crash_bus.history
+               if e.event_type in ("action.completed", "action.failed")]) == 0,
+          "crash: no terminal event")
+    check(reconstruct_action("action-crash", crash_bus.history) is None,
+          "crash: reconstruction is unknown, NOT 'failed'")
+    check(action_attempted("action-crash", crash_bus.history),
+          "crash: the attempt is recorded (requested with no terminal)")
+
+    # 4. denied means unattempted
+    deny_authority = ContinuityAuthority([
+        Capability(name="create_book", description="publish", risk=Risk.WRITE),
+        Capability(name="delete_book", description="delete", risk=Risk.DESTRUCTIVE),
+    ])
+    deny_bus = EventBus()
+    deny_exec = CountingExecutor()
+    deny_runner = ActionRunner(deny_authority, deny_exec, deny_bus)
+    deny_runner.run(ActionRequest(action_id="action-deny", capability="delete_book",
+                                  scope="project/xyz", requested_by=agent), ncs)
+    store_neutral, ncs_neutral = make_ncs(user, agent, model)
+    deny_runner.run(ActionRequest(action_id="action-approve", capability="create_book",
+                                  scope="project/xyz", requested_by=agent), ncs_neutral)
+    check(deny_exec.calls == 0, "DENY + APPROVAL_REQUIRED: the executor is never called")
+    check(len([e for e in deny_bus.history if e.event_type == "action.requested"]) == 0,
+          "DENY + APPROVAL_REQUIRED: no action.requested (unattempted)")
+    store_neutral.close()
+
+    # 5. idempotent retry emits no new attempt
+    check(len([e for e in bus.history if e.event_type == "action.requested"
+               and e.payload.get("action_id") == "action-a"]) == 1,
+          "retrying A does NOT emit a second action.requested")
 
     store.close()
     print("\nPASS: Phase 8.3 action lifecycle/idempotency holds "

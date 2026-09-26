@@ -110,6 +110,10 @@ def main():
     b_actions = [e for e in bus_b.history if e.event_type == "action.completed"]
     check(len(b_actions) == 1 and b_actions[0].payload.get("action_id") == o1.remote_action_id,
           "B's action.completed is authoritative in B (B owns the action)")
+    check(len([e for e in bus_b.history if e.event_type == "action.requested"]) == 1,
+          "B emits action.requested before its side effect (inherits AD-050)")
+    check(len([e for e in bus_a.history if e.event_type == "action.requested"]) == 0,
+          "no B action lifecycle event crosses into A")
 
     recorded = recorder.record(o1)
     check(recorded == o1, "A records the bounded outcome")
