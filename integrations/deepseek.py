@@ -16,6 +16,7 @@ Uses stdlib `urllib.request` only, so no third-party HTTP library crosses the la
 """
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -93,6 +94,13 @@ class DeepseekModel:
         except urllib.error.URLError as exc:
             return ModelResponse(model=self._model, content="", success=False,
                                  error=f"provider error: {exc.reason}")
+        except (http.client.HTTPException, ConnectionError) as exc:
+            # A transient transport failure (RemoteDisconnected, ConnectionReset,
+            # IncompleteRead, ...) is a BOUNDED provider failure at this boundary —
+            # never an unclassified exception that escapes and kills the worker.
+            # No retry policy is assumed here; the failure is normalized only.
+            return ModelResponse(model=self._model, content="", success=False,
+                                 error=f"provider transport error: {type(exc).__name__}")
 
         try:
             data = json.loads(body)
