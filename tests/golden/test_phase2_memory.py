@@ -88,6 +88,17 @@ def main():
     ep_failed = extract_episode(t2, r2, e2, ev2)
     check(ep_failed.outcome == "failed", "a failed run yields a failed episode")
 
+    # absence of a terminal event must NOT become a terminal verdict
+    task3 = Task(task_id=new_id("task"), title="interrupted run")
+    bus3 = EventBus()
+    run3 = Run(run_id=new_id("run"), task_id=task3.task_id)
+    _emit(bus3, EventType.STEP_STARTED, run3, "orchestrator", "running", {"step_id": "s1"})
+    _emit(bus3, EventType.TOOL_REQUESTED, run3, "mcp", "running", {"tool": "github.read_file"})
+    # no run.completed / run.failed
+    ep_interrupted = extract_episode(task3, run3, bus3.history)
+    check(ep_interrupted.outcome == "unknown",
+          "a run with no terminal event projects to 'unknown' (absence is not a verdict)")
+
     # store + retrieve
     store = InMemoryEpisodeStore()
     store.add(ep)

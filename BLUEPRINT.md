@@ -39,6 +39,15 @@ Phases 7–10 gave the earlier machinery richer semantics; later phases should
 increasingly be compositions of already-proven authority domains (authority →
 authoritative result) rather than new machinery that reaches around them.
 
+## A third principle
+
+**The component that proposes a state-changing interpretation must never be
+sufficient authority for that interpretation to become fact.** Nexus applies this
+shape three times — ActionRequest → Authority, LearningProposal →
+LearningAuthority, DelegationRequest → independent authorities — and it carries
+Aurora's refinement: a proposer must never be the only witness to its own
+decisions.
+
 ## Control plane vs execution plane (the distinction that matters)
 
 The directory split (`control/` vs `execution/`) is secondary. The rule is:
@@ -207,7 +216,8 @@ into an **Episode**:
   summary / outcome / entities / provenance. episode_id and timestamp are the
   only fresh-per-record fields.
 - **Outcome is derived from events** (run.completed → success, run.failed →
-  failed), never from the model's opinion of itself.
+  failed, neither → unknown), never from the model's opinion of itself — absence
+  of a terminal event is never promoted into a terminal verdict.
 - **`memory/` is a top-level package** (not under `knowledge/`): it imports core
   only. The reference store ranks by keyword overlap — no embeddings yet; a
   semantic-recall adapter is a later implementation behind the same contract.
