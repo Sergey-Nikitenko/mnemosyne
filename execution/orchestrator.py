@@ -26,9 +26,9 @@ import json
 from dataclasses import asdict, dataclass, field
 
 from core.contracts import (
-    AgentIdentity, ApprovalRequest, Event, ModelIdentity, ModelRequest,
-    PolicyVerdict, Run, RunManifest, Step, StepStatus, Task, TaskStatus, ToolCall,
-    Trace, UserIdentity, new_id, utcnow,
+    ActionRequest, AgentIdentity, ApprovalRequest, Event, ModelIdentity,
+    ModelRequest, PolicyVerdict, Run, RunManifest, Step, StepStatus, Task,
+    TaskStatus, ToolCall, Trace, UserIdentity, new_id, utcnow,
 )
 from core.events import EventBus, EventType
 from core.state import RunState
@@ -58,6 +58,18 @@ def _result_content(result) -> str:
     return json.dumps(result.output)
 
 
+def _result_invocation(result) -> tuple:
+    """(name, arguments, correlation_id) of a result — a ToolResult's tool_call,
+    or an ActionResult's capability/parameters. Keeps the conversation builder
+    agnostic to which execution level produced the result."""
+    tc = getattr(result, "tool_call", None)
+    if tc is not None:
+        return (tc.tool_name, dict(tc.arguments), tc.correlation_id)
+    return (getattr(result, "capability", "?"),
+            dict(getattr(result, "parameters", {})),
+            getattr(result, "correlation_id", ""))
+
+
 def _tool_follow_up(tool_results) -> list[dict]:
     """Build the model-neutral conversation turn that follows tool execution:
     the assistant's tool invocations first, then each correlated tool result.
@@ -65,19 +77,22 @@ def _tool_follow_up(tool_results) -> list[dict]:
     provider/adapter owns translating that into its own wire field (tool_call_id).
     """
     assistant_calls = [
-        {"correlation_id": r.tool_call.correlation_id,
-         "name": r.tool_call.tool_name,
-         "arguments": dict(r.tool_call.arguments)}
-        for r in tool_results
+        {"correlation_id": cid, "name": name, "arguments": args}
+        for name, args, cid in (_result_invocation(r) for r in tool_results)
     ]
     tool_msgs = [
-        {"role": "tool",
-         "correlation_id": r.tool_call.correlation_id,
-         "name": r.tool_call.tool_name,
-         "content": _result_content(r)}
-        for r in tool_results
+        {"role": "tool", "correlation_id": cid, "name": name, "content": _result_content(r)}
+        for r, (name, args, cid) in zip(tool_results,
+                                        (_result_invocation(r) for r in tool_results))
     ]
     return [{"role": "assistant", "tool_calls": assistant_calls}] + tool_msgs
+
+
+def _action_to_dict(action: ActionRequest) -> dict:
+    """Serialize the logical identity of a pending action for the continuation."""
+    return {"action_id": action.action_id, "capability": action.capability,
+            "parameters": dict(action.parameters),
+            "correlation_id": action.correlation_id}
 
 
 class Orchestrator:
@@ -85,7 +100,8 @@ class Orchestrator:
 
     def __init__(self, *, retriever, executor, policy, tools, evaluator,
                  bus=None, approvals=None, run_records=None, max_replans: int = 2,
-                 max_tool_rounds: int = 8, continuation=None) -> None:
+                 max_tool_rounds: int = 8, continuation=None,
+                 action_runner=None, ncs_provider=None) -> None:
         self.retriever = retriever      # .search(query, filters, k) -> RetrievalResult
         self.executor = executor        # raw capability (FakeExecutor, subprocess, ...)
         self.policy = policy            # PolicyEngine (tool gating)
@@ -102,6 +118,12 @@ class Orchestrator:
         # Durable continuation checkpoint (optional): where an approval-paused run
         # resumes from, instead of restarting from the original request.
         self.continuation = continuation
+        # Agency integration (Phase 3.x/8.x): when wired, the canonical task loop
+        # routes each model tool proposal through the Phase-8 ActionRunner
+        # (Authority -> action.requested -> tool.* -> action.completed). When None,
+        # the legacy Phase-1-policy + Phase-3-tool path runs (backward compatible).
+        self.action_runner = action_runner
+        self.ncs_provider = ncs_provider  # callable() -> NexusContinuityState
 
     def _model_identity(self) -> ModelIdentity:
         """Which logical model configuration this executor runs — a ModelIdentity
@@ -155,77 +177,138 @@ class Orchestrator:
             messages.extend(extra_messages or [])
             return ModelRequest(messages=messages)
 
+        def _ncs():
+            return self.ncs_provider() if self.ncs_provider else None
+
+        def _legacy_call(call, spec):
+            verdict = self.policy.decide_tool(spec)
+            reason = {
+                PolicyVerdict.ALLOW: f"Policy allows a {spec.risk.value} operation",
+                PolicyVerdict.DENY: f"Policy rejects a {spec.risk.value} operation",
+                PolicyVerdict.APPROVAL_REQUIRED:
+                    f"Policy requires approval for a {spec.risk.value} operation",
+            }[verdict]
+            emit(EventType.POLICY_DECISION, "success", {
+                "tool": call.tool_name, "verdict": verdict.value, "risk": spec.risk.value,
+                "executed": verdict == PolicyVerdict.ALLOW, "reason": reason,
+                "call_id": call.call_id,
+            })
+            if verdict == PolicyVerdict.ALLOW:
+                result = instr.execute_tool(call)
+                trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                    "verdict": "allow", "success": result.success})
+                return result, False, None
+            if verdict == PolicyVerdict.APPROVAL_REQUIRED:
+                if self.approvals is not None:
+                    granted = self.approvals.find_approved(
+                        task.task_id, call.tool_name, spec.risk)
+                    if granted is not None:
+                        consumed = self.approvals.consume_approved(granted.approval_id)
+                        if consumed is not None:
+                            result = instr.execute_tool(call)
+                            trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                                "verdict": "approved", "success": result.success})
+                            return result, False, None
+                        trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                            "verdict": "consumed_elsewhere"})
+                        return None, False, None
+                    approval = ApprovalRequest(
+                        approval_id=new_id("appr"), task_id=task.task_id,
+                        run_id=run.run_id, tool_name=call.tool_name, risk=spec.risk)
+                    self.approvals.create(approval)
+                    trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                        "verdict": "approval_required",
+                                        "approval_id": approval.approval_id})
+                    return None, True, {"tool_name": call.tool_name,
+                                        "arguments": dict(call.arguments),
+                                        "correlation_id": call.correlation_id}
+                emit(EventType.APPROVAL_REQUIRED, "pending", {"tool": call.tool_name})
+                trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                    "verdict": "approval_required"})
+                return None, False, None
+            # DENY
+            trace.nodes.append({"type": "tool", "tool": call.tool_name, "verdict": "deny"})
+            return None, False, None
+
+        def _agency_call(call, spec):
+            # The model proposes a tool operation; it becomes a logical ActionRequest
+            # (action_id = A) and passes through the Phase-8 Authority + ActionRunner.
+            action = ActionRequest(
+                capability=call.tool_name,
+                action_id=call.correlation_id or new_id("act"),
+                parameters=dict(call.arguments),
+                requested_by=AgentIdentity(agent_id=task.agent, role=task.agent),
+                scope="",
+                correlation_id=call.correlation_id,
+            )
+            verdict = self.action_runner.evaluate(action, _ncs())
+            emit(EventType.POLICY_DECISION, "success", {
+                "tool": call.tool_name, "verdict": verdict.verdict.value,
+                "risk": spec.risk.value, "executed": verdict.verdict == PolicyVerdict.ALLOW,
+                "reason": "; ".join(verdict.reasons), "call_id": call.call_id,
+                "action_id": action.action_id,
+            })
+            if verdict.verdict == PolicyVerdict.ALLOW:
+                result = self.action_runner.run(action, _ncs(),
+                                                run_id=run.run_id, task_id=task.task_id)
+                trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                    "verdict": "allow",
+                                    "success": result.success if result is not None else None,
+                                    "action_id": action.action_id})
+                return result, False, None
+            if verdict.verdict == PolicyVerdict.APPROVAL_REQUIRED:
+                if self.approvals is not None:
+                    granted = self.approvals.find_approved(
+                        task.task_id, call.tool_name, spec.risk)
+                    if granted is not None:
+                        consumed = self.approvals.consume_approved(granted.approval_id)
+                        if consumed is not None:
+                            result = self.action_runner.run(action, _ncs(),
+                                                            run_id=run.run_id, task_id=task.task_id)
+                            trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                                "verdict": "approved",
+                                                "success": result.success if result is not None else None,
+                                                "action_id": action.action_id})
+                            return result, False, None
+                        trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                            "verdict": "consumed_elsewhere"})
+                        return None, False, None
+                    approval = ApprovalRequest(
+                        approval_id=new_id("appr"), task_id=task.task_id,
+                        run_id=run.run_id, tool_name=call.tool_name, risk=spec.risk,
+                        action_id=action.action_id)
+                    self.approvals.create(approval)
+                    trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                        "verdict": "approval_required",
+                                        "approval_id": approval.approval_id,
+                                        "action_id": action.action_id})
+                    return None, True, _action_to_dict(action)
+                emit(EventType.APPROVAL_REQUIRED, "pending", {"tool": call.tool_name})
+                trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                    "verdict": "approval_required"})
+                return None, False, None
+            # DENY
+            trace.nodes.append({"type": "tool", "tool": call.tool_name, "verdict": "deny"})
+            return None, False, None
+
         def run_tools(tool_calls):
             results = []
             waiting = False
-            pending_call = None
+            pending = None
             for call in tool_calls:
-                # Nexus owns the execution identity (AD-012's twin for calls):
-                # re-mint per ATTEMPT, so a replayed/recovered invocation can never
-                # be conflated with the first one. The provider's (or model's) own
-                # id is deliberately ignored — at-least-once means two physical side
-                # effects must show as two distinct calls in the event log.
+                # Nexus owns the physical execution identity: re-mint per ATTEMPT so
+                # a replayed invocation is a distinct physical call (call_id = C).
                 call.call_id = new_id("call")
                 spec = self.tools.get(call.tool_name)
-                verdict = self.policy.decide_tool(spec)
-                # the decision is observable (with its OWN reason — the UI renders
-                # this, it never recomputes policy semantics)
-                reason = {
-                    PolicyVerdict.ALLOW: f"Policy allows a {spec.risk.value} operation",
-                    PolicyVerdict.DENY: f"Policy rejects a {spec.risk.value} operation",
-                    PolicyVerdict.APPROVAL_REQUIRED:
-                        f"Policy requires approval for a {spec.risk.value} operation",
-                }[verdict]
-                emit(EventType.POLICY_DECISION, "success", {
-                    "tool": call.tool_name,
-                    "verdict": verdict.value,
-                    "risk": spec.risk.value,
-                    "executed": verdict == PolicyVerdict.ALLOW,
-                    "reason": reason,
-                    "call_id": call.call_id,
-                })
-                if verdict == PolicyVerdict.ALLOW:
-                    result = instr.execute_tool(call)
-                    trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                        "verdict": "allow", "success": result.success})
+                if self.action_runner is not None:
+                    result, waiting, pending = _agency_call(call, spec)
+                else:
+                    result, waiting, pending = _legacy_call(call, spec)
+                if result is not None:
                     results.append(result)
-                elif verdict == PolicyVerdict.APPROVAL_REQUIRED:
-                    if self.approvals is not None:
-                        # policy is re-checked here: an approved action is still
-                        # gated by the CURRENT policy, never magically authorized.
-                        granted = self.approvals.find_approved(
-                            task.task_id, call.tool_name, spec.risk)
-                        if granted is not None:
-                            # ATOMIC single-use consume: the database decides the
-                            # winner; a loser (None) must not execute the tool.
-                            consumed = self.approvals.consume_approved(granted.approval_id)
-                            if consumed is not None:
-                                result = instr.execute_tool(call)
-                                trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                                    "verdict": "approved", "success": result.success})
-                                results.append(result)
-                            else:
-                                trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                                    "verdict": "consumed_elsewhere"})
-                        else:
-                            approval = ApprovalRequest(
-                                approval_id=new_id("appr"), task_id=task.task_id,
-                                run_id=run.run_id, tool_name=call.tool_name, risk=spec.risk)
-                            self.approvals.create(approval)  # emits approval.required
-                            trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                                "verdict": "approval_required",
-                                                "approval_id": approval.approval_id})
-                            waiting = True
-                            pending_call = call
-                            break  # pause: the task waits for human approval
-                    else:
-                        emit(EventType.APPROVAL_REQUIRED, "pending", {"tool": call.tool_name})
-                        trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                            "verdict": "approval_required"})
-                else:  # DENY
-                    trace.nodes.append({"type": "tool", "tool": call.tool_name,
-                                        "verdict": "deny"})
-            return results, waiting, pending_call
+                if waiting:
+                    break
+            return results, waiting, pending
 
         def verify(tool_results, attempt):
             evaluation = self.evaluator.evaluate(tool_results=tool_results)
@@ -302,16 +385,38 @@ class Orchestrator:
                 pending = cont["pending_call"]
                 cont = None  # the checkpoint is consumed by this resume
             if pending is not None:
-                # approval resumes an INTERRUPTED invocation (exact correlation/
-                # name/args); it never authorizes whatever the model proposes next.
-                pending_tool = ToolCall(tool_name=pending["tool_name"],
-                                        arguments=pending["arguments"],
-                                        correlation_id=pending["correlation_id"])
-                results, _waiting, _pending = step("tool", lambda: run_tools([pending_tool]))
-                tool_results.extend(results)
-                conversation.extend(_tool_follow_up(results))
-                rounds += 1
-                self.continuation.clear(task.task_id)
+                # approval resumes the EXACT pending thing (logical action or
+                # physical tool call); it never authorizes whatever the model
+                # proposes next.
+                if self.action_runner is not None and "action_id" in pending:
+                    action = ActionRequest(
+                        capability=pending["capability"], action_id=pending["action_id"],
+                        parameters=pending["parameters"],
+                        requested_by=AgentIdentity(agent_id=task.agent, role=task.agent),
+                        scope="", correlation_id=pending["correlation_id"])
+                    spec = self.tools.get(action.capability)
+                    result = None
+                    granted = self.approvals.find_approved(
+                        task.task_id, action.capability, spec.risk)
+                    if granted is not None:
+                        consumed = self.approvals.consume_approved(granted.approval_id)
+                        if consumed is not None:
+                            result = self.action_runner.run_approved(
+                                action, _ncs(), run_id=run.run_id, task_id=task.task_id)
+                    results = [result] if result is not None else []
+                    tool_results.extend(results)
+                    conversation.extend(_tool_follow_up(results))
+                    rounds += 1
+                    self.continuation.clear(task.task_id)
+                else:
+                    pending_tool = ToolCall(tool_name=pending["tool_name"],
+                                            arguments=pending["arguments"],
+                                            correlation_id=pending["correlation_id"])
+                    results, _waiting, _pending = step("tool", lambda: run_tools([pending_tool]))
+                    tool_results.extend(results)
+                    conversation.extend(_tool_follow_up(results))
+                    rounds += 1
+                    self.continuation.clear(task.task_id)
 
             response = step("model", lambda: do_model(retrieved, conversation))
 
@@ -333,11 +438,7 @@ class Orchestrator:
                 if waiting:
                     if self.continuation is not None:
                         self.continuation.save(
-                            task.task_id, conversation,
-                            {"tool_name": pending_call.tool_name,
-                             "arguments": dict(pending_call.arguments),
-                             "correlation_id": pending_call.correlation_id},
-                            rounds)
+                            task.task_id, conversation, pending_call, rounds)
                     trace.nodes.append({"type": "waiting"})
                     return Outcome(answer="", run=run, trace=trace, live_state=state,
                                    events=list(self.bus.history), waiting=True,

@@ -27,7 +27,7 @@ import os
 from dataclasses import dataclass, field
 
 from core.contracts import (
-    AgentIdentity, Capability, ModelIdentity, UserIdentity,
+    AgentIdentity, Capability, ModelIdentity, UserIdentity, utcnow,
 )
 from control.authority import ContinuityAuthority
 from control.policy import PolicyEngine, PolicyRules
@@ -207,19 +207,24 @@ class CompositionRoot:
                                          model_identity=config.model)
         else:
             executor = FakeExecutor(model_script=list(config.model_script))
-        runtime = NexusRuntime(retriever=retriever, executor=executor, queue=queue,
-                               event_bus=bus, tools=tools, approvals=approvals,
-                               policy=policy, worker_id=config.worker_id,
-                               max_replans=config.max_replans,
-                               max_tool_rounds=config.max_tool_rounds,
-                               continuation=continuation)
-
         # agency (authority decides; runner executes — never a bypass)
         authority = ContinuityAuthority(capabilities, policy)
         runner = ActionRunner(authority, executor, bus)
 
         # continuity (read-side projection of identity + memory)
         projector = ContinuityProjector()
+
+        def ncs_provider():
+            return projector.project(utcnow(), memory, user=config.user,
+                                     agent=config.agent, model=config.model)
+
+        runtime = NexusRuntime(retriever=retriever, executor=executor, queue=queue,
+                               event_bus=bus, tools=tools, approvals=approvals,
+                               policy=policy, worker_id=config.worker_id,
+                               max_replans=config.max_replans,
+                               max_tool_rounds=config.max_tool_rounds,
+                               continuation=continuation,
+                               action_runner=runner, ncs_provider=ncs_provider)
 
         # learning (analyze -> authority -> adapt; the only write path)
         analyzer = EvidenceAnalyzer()

@@ -388,6 +388,7 @@ class ActionRequest:
     requested_by: AgentIdentity = field(default_factory=AgentIdentity)
     scope: str = ""
     claims: list[str] = field(default_factory=list)
+    correlation_id: str = ""     # the model's own tool-call id (conversation correlation)
 
 
 @dataclass
@@ -432,6 +433,8 @@ class ActionResult:
     run_id: str = ""
     task_id: str = ""
     completed_at: str = ""      # isoformat timestamp (rides the event)
+    call_id: str = ""           # the physical execution attempt (ToolCall.call_id)
+    correlation_id: str = ""    # the model's tool-call id (conversation correlation)
 
 
 @dataclass
@@ -608,14 +611,16 @@ class ModelResponse:
 class ApprovalRequest:
     """A request for human authorization of ONE specific proposed tool call.
 
-    Bound to its identity (task/run/tool/risk) so approving one action cannot
-    authorize another. Single-use: pending -> approved/denied -> consumed."""
+    Bound to its identity (task/run/tool/risk, and now the logical action_id) so
+    approving one action cannot authorize another. Single-use: pending ->
+    approved/denied -> consumed."""
     approval_id: str
     task_id: str
     run_id: str
     tool_name: str
     risk: Risk
     status: str = "pending"  # pending / approved / denied / consumed / expired
+    action_id: str = ""      # the logical agency action (Phase 8) this approval gates
 
 
 @dataclass

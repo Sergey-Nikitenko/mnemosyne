@@ -13,6 +13,16 @@ from __future__ import annotations
 from core.contracts import Evaluation, ToolResult
 
 
+def _result_name(result) -> str:
+    """The tool/operation name of a result — a ToolResult's tool_call, or an
+    ActionResult's capability. Keeps the evaluator agnostic to which execution
+    level produced the result."""
+    tc = getattr(result, "tool_call", None)
+    if tc is not None:
+        return getattr(tc, "tool_name", "?")
+    return getattr(result, "capability", "?")
+
+
 class Evaluator:
     def evaluate(
         self,
@@ -27,7 +37,7 @@ class Evaluator:
             checks["tests"] = "pass" if tests_passed else "fail"
         if tool_results is not None:
             checks["tool_success"] = all(r.success for r in tool_results)
-            failed = [r.tool_call.tool_name for r in tool_results if not r.success]
+            failed = [_result_name(r) for r in tool_results if not r.success]
             if failed:
                 checks["failed_tools"] = failed
         if files_changed is not None:

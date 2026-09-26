@@ -26,10 +26,12 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from core.contracts import (
-    ActionRequest, ActionResult, Event, PolicyVerdict, ToolCall, new_id, utcnow,
+    ActionRequest, ActionResult, ActionVerdict, Event, PolicyVerdict, ToolCall,
+    new_id, utcnow,
 )
 from core.events import EventBus, EventType
 from core.state import reconstruct_action
+from execution.instrumented import InstrumentedExecutor
 
 _TERMINAL = {EventType.ACTION_COMPLETED, EventType.ACTION_FAILED}
 
@@ -53,6 +55,13 @@ class ActionRunner:
                 found = ev
         return found
 
+    def _find_requested(self, action_id: str) -> bool:
+        """Was this logical action already attempted (requested) with no terminal?
+        Attempted-but-unknown must NOT be auto-re-executed: the absence of a
+        terminal event is an unknown outcome, not permission to run again."""
+        return any(ev.event_type == EventType.ACTION_REQUESTED
+                   and ev.payload.get("action_id") == action_id for ev in self._events())
+
     def _emit_requested(self, action: ActionRequest, action_id: str,
                         run_id: str, task_id: str) -> None:
         """Record the attempt durably BEFORE the Executor may cause a side effect."""
@@ -73,6 +82,11 @@ class ActionRunner:
             },
         ))
 
+    def evaluate(self, action: ActionRequest, ncs) -> ActionVerdict:
+        """The pure verdict (authority), without execution — so a caller can branch
+        DENY / APPROVAL_REQUIRED / ALLOW before deciding to run."""
+        return self.authority.evaluate(action, ncs)
+
     def run(self, action: ActionRequest, ncs, *, run_id: str = "",
             task_id: str = "") -> ActionResult | None:
         action_id = action.action_id or new_id("act")
@@ -80,15 +94,38 @@ class ActionRunner:
             # Idempotent: this logical action already has an authoritative terminal
             # outcome. Return it — never a second execution, never an auto-retry.
             return reconstruct_action(action_id, self._events())
+        if self._find_requested(action_id):
+            # Attempted but unknown: do NOT auto-re-execute. Recovery semantics are
+            # a separate concern; the integration only makes the state visible and
+            # prevents duplicate side effects.
+            return None
         verdict = self.authority.evaluate(action, ncs)
         if verdict.verdict != PolicyVerdict.ALLOW:
             # DENY / APPROVAL_REQUIRED: the verdict is authoritative — no execution,
             # no terminal event, and no action.requested.
             return None
+        return self.run_approved(action, ncs, run_id=run_id, task_id=task_id)
+
+    def run_approved(self, action: ActionRequest, ncs, *, run_id: str = "",
+                     task_id: str = "") -> ActionResult | None:
+        """Execute an action whose approval the caller has already consumed — the
+        granted approval IS the authorization, so the authority is not re-evaluated.
+        Still idempotent (terminal -> reconstruct; attempted/unknown -> no re-run)."""
+        action_id = action.action_id or new_id("act")
+        if self._find_terminal(action_id) is not None:
+            return reconstruct_action(action_id, self._events())
+        if self._find_requested(action_id):
+            return None
         # the attempt is durably recorded BEFORE the side effect can occur (AD-050)
         self._emit_requested(action, action_id, run_id, task_id)
-        tool_result = self.executor.execute_tool(
-            ToolCall(tool_name=action.capability, arguments=dict(action.parameters)))
+        # physical execution: a fresh ToolCall (call_id = C) through the instrumented
+        # executor, so tool.requested(C) -> side effect -> tool.completed(C) is the
+        # physical layer's own observable attempt, distinct from action_id = A.
+        call = ToolCall(tool_name=action.capability, arguments=dict(action.parameters),
+                        correlation_id=action.correlation_id)
+        instr = InstrumentedExecutor(self.executor, self.bus,
+                                     run_id=run_id, task_id=task_id)
+        tool_result = instr.execute_tool(call)
         now = utcnow()
         result = ActionResult(
             action_id=action_id,
@@ -102,6 +139,8 @@ class ActionRunner:
             run_id=run_id,
             task_id=task_id,
             completed_at=now.isoformat(),
+            call_id=call.call_id,              # physical attempt C
+            correlation_id=action.correlation_id,  # model tool-call id (conversation)
         )
         event_type = (EventType.ACTION_COMPLETED if tool_result.success
                       else EventType.ACTION_FAILED)

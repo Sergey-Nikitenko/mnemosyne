@@ -131,6 +131,8 @@ def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult | No
         run_id=match.run_id,
         task_id=match.task_id,
         completed_at=match.timestamp.isoformat(),
+        call_id=match.payload.get("call_id", ""),
+        correlation_id=match.payload.get("correlation_id", ""),
     )
 
 
