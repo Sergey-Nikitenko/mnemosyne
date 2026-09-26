@@ -46,6 +46,8 @@ class EventType(str):
     RUN_REPLANNED = "run.replanned"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
+    # Phase 8 (agency): a successful, allowed action executed and completed.
+    ACTION_COMPLETED = "action.completed"
 
 
 Handler = Callable[[Event], None]

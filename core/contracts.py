@@ -406,6 +406,27 @@ class Authority(Protocol):
 
 
 @dataclass
+class ActionResult:
+    """What happened when an allowed action executed (AD-041).
+
+    The execution half of the agency boundary — distinct from ActionVerdict
+    ("may this happen?"). It carries the outcome (success/output/error) plus the
+    provenance needed to reconstruct the completion from the event log. The
+    `action.completed` event is this object's authoritative record."""
+    action_id: str
+    capability: str
+    success: bool
+    output: Any = None
+    error: str | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+    requested_by: str = ""      # agent key
+    scope: str = ""
+    run_id: str = ""
+    task_id: str = ""
+    completed_at: str = ""      # isoformat timestamp (rides the event)
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

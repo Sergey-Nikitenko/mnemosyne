@@ -1120,6 +1120,39 @@ Proven by `tests/golden/test_phase8_capability.py` (contract, model-independence
 continuity-awareness, scope-awareness, no self-authorization, DENY-final, purity).
 The proof stops at the verdict — no execution, no autonomy.
 
+### Phase 8.2 — controlled action execution
+
+When the Authority returns ALLOW, execute the proposed capability through the
+existing execution plane and record an authoritative, reconstructible completion
+event (AD-041):
+
+    ActionRequest -> Authority -> (ALLOW) -> Executor -> ActionResult
+                    -> action.completed -> reconstruct
+
+- **ALLOW is the only execution path.** `ActionRunner` (`execution/action.py`) is
+  the single path from verdict to execution: DENY and APPROVAL_REQUIRED never
+  reach the Executor. Neither the model nor the executor can bypass the verdict.
+- **The existing Executor does the work.** The runner delegates to the injected
+  `Executor` (the Phase 3 boundary) — no agency-specific execution engine. It maps
+  the ActionRequest to a `ToolCall` and wraps the `ToolResult`.
+- **ActionResult is the outcome, not the authorization.** `ActionVerdict` answers
+  "may this happen?"; `ActionResult` answers "what happened?" (success/output/error
+  + identity). They are never combined.
+- **An authoritative, bounded completion event.** A successful execution emits
+  `action.completed` carrying who requested, which capability, the authorized
+  parameters, the run/task, when, and the bounded result — never a transcript.
+- **Reconstruction.** `reconstruct_action(action_id, events)` projects the
+  `ActionResult` back from the event log, deterministically — the agency layer's
+  bridge to the event-sourced substrate (Phase 3/6).
+
+Proven by `tests/golden/test_phase8_execution.py` (ALLOW executes exactly once;
+DENY/APPROVAL never call the executor; result/provenance/identity preserved;
+reconstruction identical and repeatable).
+
+The slice stops here: no retries, no learning, no capability discovery, no
+planning, no autonomy, no new persistence. Execution does not silently become
+learning — that belongs to Phase 9.
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1183,6 +1216,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-038** — Context adaptation is a translation boundary, not an orchestration layer: `ContextAdapter.adapt(ncs) -> ContextRequest` is a pure, deterministic function of (ncs, configuration) that turns a model-neutral NCS into a provider/model-specific request. It never retrieves or mutates memory, never decides identity or selects a model, never invokes a model or calls MCP, never touches a provider SDK or the event store, and never modifies the NCS. Provider vocabulary lives only in the request/adapter; the NCS stays model-neutral.
 - **AD-039** — A model change must not require transfer of the previous model's private context for Nexus continuity to survive: the handoff is reconstructive, not transmissive. Model B reconstructs continuity from authoritative state (re-project the event-sourced memory as-of with the new `ModelIdentity`, then adapt), never from Model A's messages, hidden state, prompt, transcript, or response. User/agent identity stay byte-identical; only `ModelIdentity` changes; and persisted memory reaches Model B through the same 7.3→7.4 pipeline.
 - **AD-040** — The authority that validates a proposed action is a pure, model-independent, continuity-aware function of (proposal, NCS, policy): `Authority.evaluate(action, ncs) -> ActionVerdict`. The model proposes; the authority decides; the executor executes; events record. The verdict never reads the proposing model's identity, reads durable continuity (preferences scoped to the action) to refine the static risk gate, ignores the model's self-assertions, and never executes or emits. Static DENY (destructive/denylist) is final — continuity refines, never overrides the reflex arc.
+- **AD-041** — Action execution is gated by the authority and recorded as an authoritative, reconstructible event: only an ALLOW verdict reaches the Executor (DENY / APPROVAL_REQUIRED never execute); the outcome is an `ActionResult` (distinct from `ActionVerdict`); and a successful execution emits a bounded `action.completed` event carrying enough provenance (who/capability/parameters/run/task/when/result) to reconstruct the completion deterministically. Execution never silently becomes learning.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1292,6 +1326,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | ContextAdapter boundary (7.4): deterministic, pure, faithful translation; provider vocabulary stays off the NCS | `tests/golden/test_phase7_context_adapter.py` |
 | Model handoff / continuity independence (7.5): reconstructive, not transmissive — Model A's private context never crosses | `tests/golden/test_phase7_handoff.py` |
 | Capability/authority boundary (8.1): model proposes; a model-independent, continuity-aware authority decides | `tests/golden/test_phase8_capability.py` |
+| Controlled action execution (8.2): ALLOW is the only execution path; the existing Executor executes; completion reconstructs | `tests/golden/test_phase8_execution.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .contracts import Event, Run, Step, StepStatus, Task, TaskStatus
+from .contracts import ActionResult, Event, Run, Step, StepStatus, Task, TaskStatus
 
 
 @dataclass
@@ -105,3 +105,26 @@ class ApprovalState:
             elif ev.event_type == "approval.consumed":
                 state.status = "consumed"
         return state
+
+
+def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult:
+    """Project an action's completion from its authoritative action.completed event.
+
+    Deterministic: the same events yield the same ActionResult. Returns an empty
+    (success=False) result if no matching completion event exists."""
+    for ev in events:
+        if ev.event_type == "action.completed" and ev.payload.get("action_id") == action_id:
+            return ActionResult(
+                action_id=action_id,
+                capability=ev.payload.get("capability", ""),
+                success=ev.payload.get("success", False),
+                output=ev.payload.get("output"),
+                error=ev.payload.get("error"),
+                parameters=ev.payload.get("parameters", {}),
+                requested_by=ev.payload.get("requested_by", ""),
+                scope=ev.payload.get("scope", ""),
+                run_id=ev.run_id,
+                task_id=ev.task_id,
+                completed_at=ev.timestamp.isoformat(),
+            )
+    return ActionResult(action_id=action_id, success=False)
