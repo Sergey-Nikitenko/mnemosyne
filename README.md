@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (64 golden + conformance tests)
+# Run the entire suite (65 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -82,6 +82,7 @@ python tests/golden/test_phase9_learning_proposal.py # learning proposals: obser
 python tests/golden/test_phase9_learning_authority.py # learning authority: ALLOW is permission, not mutation
 python tests/golden/test_phase9_adaptation.py         # authorized adaptation: compare-and-append, exactly-once
 python tests/golden/test_phase10_federation_peer.py    # federation identity: representation before trust
+python tests/golden/test_phase10_delegation.py         # federated delegation: a bounded request, never authority
 ```
 
 ---
@@ -123,6 +124,11 @@ remote Nexus may declare identity, protocol version, and capability claims, and 
 `Federation` component represents it as a bounded, namespaced `FederationPeer`.
 Those claims never become local authority or shared state; protocol compatibility
 is checked explicitly; no crypto, no transport dependency.
+
+**Phase 10.2 shipped.** Federated delegation: a `DelegationSender` authorizes
+sending via A's own authority; a `DelegationReceiver` independently accepts or
+refuses via B's own authority. A `DelegationVerdict.ALLOW` means "accepted in
+principle" — nothing executes, no shared state, no authority transit.
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

@@ -1334,6 +1334,36 @@ Proven by `tests/golden/test_phase10_federation_peer.py` (independent identity,
 stable representation, claims-not-authority, state isolation, bounded disclosure,
 explicit compatibility, malicious self-authorization rejected).
 
+### Phase 10.2 — federated delegation
+
+Can Nexus A request a bounded capability from Nexus B without granting B authority
+over A, or treating the request as authority over B (AD-048)?
+
+    A authority -> DelegationRequest -> B authority -> DelegationVerdict -> X (no execution)
+
+- **Two independent authority decisions.** `DelegationSender` (A-side) authorizes
+  SENDING via A's own authority — if A would not permit the capability, the request
+  never crosses (federation is not a bypass). `DelegationReceiver` (B-side)
+  independently authorizes ACCEPTING via B's own authority.
+- **Contracts, not ActionRequest reuse.** `DelegationRequest` carries a Nexus-owned
+  `delegation_id` (never a run/task/action id — B mints its own action identity
+  later), the peer, capability, bounded parameters/scope, and bounded provenance.
+  `DelegationVerdict` reuses PolicyVerdict; ALLOW means "accepted in principle",
+  never that anything executed.
+- **Claims and permissions do not transit.** A's permission is permission to ask;
+  B's ALLOW is permission to accept; neither the request's self-claims
+  ("trusted"/"admin") nor A's identities confer authority inside B.
+- **Bounded disclosure.** The request carries only task context — no NCS, memory,
+  event history, or private model context.
+- **Scope never broadens.** An incompatible/broader scope is DENY (no negotiation
+  yet).
+- **No execution.** The slice stops at B's verdict: no executor, no ActionResult,
+  no completion event, and neither domain's state is mutated.
+
+Proven by `tests/golden/test_phase10_delegation.py` (outbound gate, independent
+inbound authority, refusal, self-authorization rejection, outbound bypass, scope
+rejection, no execution, and state isolation).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1404,6 +1434,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-045** — Learning authority is distinct from learning analysis: a proposal may recommend change, but only Nexus authority may permit adaptation; stale, unverified, or improperly scoped proposals cannot authorize themselves, and an ALLOW verdict never mutates authoritative state.
 - **AD-046** — Adaptation is an authorized, compare-and-append transition: only a currently permitted proposal may create exactly one new authoritative memory version, with provenance to its prior version and evidence; stale authorization never mutates state, and history is never rewritten.
 - **AD-047** — Federation begins with independent authority domains: a remote Nexus may declare identity, compatibility, and capability claims, but those declarations never become local authority or shared state; only explicitly bounded information crosses the federation boundary.
+- **AD-048** — Delegation transfers a bounded request, never authority: the requesting Nexus must authorize sending it, the receiving Nexus independently decides whether to accept it, and neither peer's claims, permissions, or identities confer authority inside the other domain.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1519,6 +1550,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Learning authority (9.2): evidence authenticity, target freshness, scope enforcement; ALLOW is permission, never mutation | `tests/golden/test_phase9_learning_authority.py` |
 | Authorized adaptation (9.3): revalidated, compare-and-append, exactly-once, append-only, provenance-preserving | `tests/golden/test_phase9_adaptation.py` |
 | Federation identity / claims (10.1): representation before trust; remote claims never become local authority or shared state | `tests/golden/test_phase10_federation_peer.py` |
+| Federated delegation (10.2): a bounded request crosses, authority never does; nothing executes | `tests/golden/test_phase10_delegation.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

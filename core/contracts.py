@@ -529,6 +529,34 @@ class FederationPeer:
 
 
 @dataclass
+class DelegationRequest:
+    """A bounded cross-domain request (AD-048). One authority domain asks another
+    to CONSIDER performing something — never authority itself. `delegation_id` is
+    the requesting domain's identity for the logical delegation (never a run/task/
+    action id; the receiver mints its own action identity later). `requested_by`
+    and `provenance` are bounded task context and self-claims — the latter is
+    never consulted by the receiver."""
+    delegation_id: str
+    peer_id: str
+    capability: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    scope: str = ""
+    requested_by: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DelegationVerdict:
+    """The receiving domain's decision about a delegation (AD-048).
+
+    `verdict` reuses PolicyVerdict (ALLOW/DENY/APPROVAL_REQUIRED). ALLOW means the
+    receiver ACCEPTS the delegation as eligible for local processing — never that
+    anything executed."""
+    verdict: PolicyVerdict
+    reasons: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""
