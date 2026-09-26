@@ -1262,6 +1262,44 @@ Proven by `tests/golden/test_phase9_learning_authority.py` (all three verdicts,
 evidence authenticity, target freshness, scope enforcement, non-self-authorization,
 purity, and proposal immutability).
 
+### Phase 9.3 — authorized adaptation (the mutation boundary)
+
+Given an ALLOWed, still-current proposal, create exactly one new authoritative
+memory version with complete provenance — without rewriting history or letting
+authorization go stale (AD-046):
+
+    LearningProposal + ALLOW -> AdaptationRunner -> record_if_current
+                              -> AdaptationResult -> memory.updated -> new version
+
+- **Revalidation, never a stale token.** `AdaptationRunner.adapt(proposal, ncs)`
+  invokes the authority itself against the CURRENT ncs immediately before mutation;
+  an old ALLOW is not a capability token.
+- **Atomic freshness in the store.** `MemoryStore.record_if_current(...)` is a
+  compare-and-append: it appends `expected_version + 1` only if the current version
+  still equals `expected_version`, in one conditional INSERT — the write boundary,
+  not a prior check, owns the invariant.
+- **Exactly-once by provenance.** A `proposal_id` already present in the target's
+  history returns the existing `AdaptationResult` — no second version, no new
+  adaptation store, no `learning.adapted` event (provenance is enough).
+- **Append-only, provenance-preserving.** The prior version stays byte-identical;
+  the new version carries bounded provenance (proposal + prior version + evidence).
+- **Continuity convergence.** After adaptation the new version is ordinary
+  authoritative memory: Phase 7 projection exposes it — no learning-specific NCS.
+- **APPROVAL_REQUIRED / DENY never mutate.** The default policy keeps Procedure →
+  APPROVAL_REQUIRED; adaptation never implements an approval workflow or weakens
+  policy to make a test pass.
+
+Proven by `tests/golden/test_phase9_adaptation.py` (revalidation, the atomic
+compare-and-append race, exactly-once, append-only history, provenance, scope,
+continuity convergence, and the non-ALLOW paths).
+
+**Phase 9 is complete and frozen** — 9.1 observe → 9.2 authorize → 9.3 adapt. The
+invariant: *adaptation is an authorized, compare-and-append transition — only a
+currently permitted proposal may create exactly one new authoritative memory
+version, with provenance to its prior version and evidence; stale authorization
+never mutates state, and history is never rewritten.* A successful adaptation does
+not recursively count as evidence for another (no self-feeding loop).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1330,6 +1368,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-043** — Compensation is a new authoritative action, never a rewrite. A corrective operation is proposed, authorized, executed, and recorded exactly like any other action — with its own identity — so the event log records `A.completed` then `B.completed`, never a rewritten A. No CompensationPlanner, UndoManager, or special execution mechanism is introduced until a concrete capability demands one.
 - **AD-044** — Learning is proposal before mutation: experience may produce a versioned, evidence-grounded candidate adaptation, but no observation, model output, score, or confidence value may directly modify authoritative state.
 - **AD-045** — Learning authority is distinct from learning analysis: a proposal may recommend change, but only Nexus authority may permit adaptation; stale, unverified, or improperly scoped proposals cannot authorize themselves, and an ALLOW verdict never mutates authoritative state.
+- **AD-046** — Adaptation is an authorized, compare-and-append transition: only a currently permitted proposal may create exactly one new authoritative memory version, with provenance to its prior version and evidence; stale authorization never mutates state, and history is never rewritten.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1443,6 +1482,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Action lifecycle / idempotency (8.3): same action_id executes at most once; failure is authoritative and not auto-retried | `tests/golden/test_phase8_lifecycle.py` |
 | Learning proposals (9.1): observation produces a bounded, evidence-grounded proposal without mutation | `tests/golden/test_phase9_learning_proposal.py` |
 | Learning authority (9.2): evidence authenticity, target freshness, scope enforcement; ALLOW is permission, never mutation | `tests/golden/test_phase9_learning_authority.py` |
+| Authorized adaptation (9.3): revalidated, compare-and-append, exactly-once, append-only, provenance-preserving | `tests/golden/test_phase9_adaptation.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

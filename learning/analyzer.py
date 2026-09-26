@@ -20,16 +20,17 @@ class EvidenceAnalyzer:
     observed evidence — data, never authoritative state."""
 
     def analyze(self, *, kind: str, target: str, target_version: int,
-                evidence: list[dict], scope: str = "",
-                proposed_by: str = "") -> LearningProposal:
+                evidence: list[dict], scope: str = "", proposed_by: str = "",
+                candidate: dict | None = None) -> LearningProposal:
+        proposed_change = (
+            dict(candidate) if candidate is not None
+            else {"candidate": f"revise {kind} '{target}' observed at v{target_version}",
+                  "evidence_count": len(evidence)})
         return LearningProposal(
             kind=kind,
             target=target,
             target_version=target_version,
-            proposed_change={
-                "candidate": f"revise {kind} '{target}' observed at v{target_version}",
-                "evidence_count": len(evidence),
-            },
+            proposed_change=proposed_change,
             evidence=[dict(e) for e in evidence],
             scope=scope,
             proposed_by=proposed_by,

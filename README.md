@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (62 golden + conformance tests)
+# Run the entire suite (63 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -80,6 +80,7 @@ python tests/golden/test_phase8_execution.py        # controlled execution: ALLO
 python tests/golden/test_phase8_lifecycle.py        # lifecycle/idempotency: same action runs at most once
 python tests/golden/test_phase9_learning_proposal.py # learning proposals: observe, never mutate
 python tests/golden/test_phase9_learning_authority.py # learning authority: ALLOW is permission, not mutation
+python tests/golden/test_phase9_adaptation.py         # authorized adaptation: compare-and-append, exactly-once
 ```
 
 ---
@@ -109,11 +110,12 @@ propose actions; Nexus alone authorizes, executes, records, and reconstructs
 their authoritative outcomes — a logical action has a Nexus-owned identity, and
 its history is never rewritten.*
 
-**Phase 9.2 shipped.** The learning plane now has its authority boundary: a pure
-`LearningAnalyzer` produces a `LearningProposal` (9.1), and a
-`GroundedLearningAuthority` returns a `LearningVerdict` (9.2) — verifying evidence
-authenticity, target freshness, and scope, then applying a kind-based policy. An
-ALLOW verdict is permission, never mutation.
+**Phase 9 complete (frozen).** The learning plane: a `LearningAnalyzer` produces a
+`LearningProposal` (9.1); a `GroundedLearningAuthority` returns a `LearningVerdict`
+(9.2); and an `AdaptationRunner` applies a currently-ALLOWed proposal as exactly
+one new authoritative memory version via an atomic, in-store compare-and-append
+(9.3). The invariant: *adaptation is an authorized, compare-and-append transition
+— stale authorization never mutates state, and history is never rewritten.*
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

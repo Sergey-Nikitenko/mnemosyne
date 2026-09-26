@@ -492,6 +492,24 @@ class LearningAuthority(Protocol):
 
 
 @dataclass
+class AdaptationResult:
+    """The authoritative outcome of an authorized adaptation (AD-046).
+
+    "What authoritative adaptation happened?" — the Phase 9 twin of the Phase 8
+    ActionVerdict vs ActionResult split. One proposal produces at most one
+    AdaptationResult: retrying returns the existing result, never a second
+    version. `provenance` carries bounded references (proposal + evidence), never
+    a copied transcript."""
+    proposal_id: str
+    memory_id: str
+    previous_version: int
+    new_version: int
+    kind: str = ""
+    scope: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

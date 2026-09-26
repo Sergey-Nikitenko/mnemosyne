@@ -61,6 +61,38 @@ class MemoryStore:
         self._conn.commit()
         return self.get(kind, memory_id)
 
+    def record_if_current(self, kind: str, memory_id: str, content: dict,
+                          expected_version: int, scope: str = "",
+                          provenance: dict | None = None, now=None):
+        """Compare-and-append: append version `expected_version + 1` ONLY if the
+        current version still equals `expected_version`, enforced in a single
+        atomic conditional INSERT (a concurrent advance to a later version makes
+        the INSERT insert zero rows). Returns the projected record, or None if the
+        target moved (stale)."""
+        current = self.get(kind, memory_id)
+        if current is None or current.version != expected_version:
+            return None
+        version = expected_version + 1
+        event_id = new_id("evt")
+        emitted = (now or utcnow()).isoformat()
+        payload = {
+            "kind": kind, "memory_id": memory_id, "version": version,
+            "scope": scope, "provenance": {"event_id": event_id, **(provenance or {})},
+            "created_at": current.created_at.isoformat(), "updated_at": emitted,
+            **content,
+        }
+        cur = self._conn.execute(
+            "INSERT INTO memory_events (event_id, kind, memory_id, version, payload, emitted_at) "
+            "SELECT ?, ?, ?, ?, ?, ? "
+            "WHERE ? = (SELECT COALESCE(MAX(version), 0) FROM memory_events "
+            "           WHERE kind = ? AND memory_id = ?)",
+            (event_id, kind, memory_id, version, json.dumps(payload), emitted,
+             expected_version, kind, memory_id))
+        self._conn.commit()
+        if cur.rowcount == 0:
+            return None
+        return self.get(kind, memory_id)
+
     def get(self, kind: str, memory_id: str):
         """Project the event log into the CURRENT version (or None)."""
         rows = self._conn.execute(
