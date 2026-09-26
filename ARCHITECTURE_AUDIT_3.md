@@ -31,7 +31,7 @@ is deliberately separated from "architecture defect."
 | COMP-1 | composition | P1 | `ActionRunner` executes through the raw Executor, not `InstrumentedExecutor` — the agency path emits no `action.requested` before execution, so a crashed action is observably invisible (AD-009 dropped for Phase 8) | **RESOLVED** (8.x) |
 | TIME-1 | temporal | P3 | `MemoryRecord.status` ("retired") exists but nothing sets, honors, or filters on it — retirement is a mechanism gap | **RESOLVED** (7.x) |
 | EVENT-1 | event | P3 | `MODEL_SELECTED` is documented "reserved, not yet emitted" but is emitted in the runtime/router path; `MODEL_FALLBACK` is genuinely reserved | OPEN (minor) |
-| COMP-2 | composition | P3 | learning evidence does not distinguish a logical action (`action_id`) from a physical retry (`call_id`) — latent amplification risk if learning ever auto-collects outcomes | OPEN (latent) |
+| COMP-2 | composition | P3 | learning evidence does not distinguish a logical action (`action_id`) from a physical retry (`call_id`) — latent amplification risk if learning ever auto-collects outcomes | **CLOSED** (NOT REPRODUCED) |
 | EXT-D | expansion | P4 | memory effectiveness (eligible → selected → delivered → followed) is unobservable | OPEN (opportunity) |
 
 No P0 and no P2 were found. The two P2-class concerns surfaced by the Vandor
@@ -329,3 +329,15 @@ authoritative memory actually useful when behavior is produced?). It is a new
 question, but it does not yet require a new invariant, so it remains an unlocked
 intersection rather than Phase 11. The audit does not nominate a new phase, and
 does not owe us one.
+
+**COMP-2 — CLOSED (NOT REPRODUCED).** Trace: Phase 9 evidence anchors to the
+logical `action_id` (`LearningAuthority._authentic` verifies against
+`action.completed`/`action.failed`); Phase 8's `ActionRunner` idempotency collapses
+physical retries into one terminal event per `action_id`; Phase 3's physical
+retries emit `tool.completed` (keyed by `call_id`), which is not action evidence.
+Therefore one logical action contributes at most one evidence entry — physical
+retries cannot amplify it. Pinned by `test_phase9_learning_authority.py`.
+
+**Audit #3 is formally closed.** All demonstrated correctness/composition findings
+(COMP-1, TIME-1) are resolved; EVENT-1 is documentation drift; COMP-2 is not
+reproduced; EXT-D is a bounded expansion opportunity, not a defect.

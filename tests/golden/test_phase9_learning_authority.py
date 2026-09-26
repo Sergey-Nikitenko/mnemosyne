@@ -137,6 +137,22 @@ def main():
     check(v_fake.verdict == PolicyVerdict.DENY, "fabricated evidence -> DENY")
     check(any("evidence" in r for r in v_fake.reasons), "the DENY names the evidence problem")
 
+    # --- COMP-2 verification: physical retries do NOT amplify learning evidence -
+    # (a) one logical action_id -> one terminal event, even under a retry
+    runner.run(ActionRequest(action_id="action-a", capability="create_book",
+                             scope="project/xyz", requested_by=agent), ncs)
+    completed_a = [e for e in bus.history if e.event_type == "action.completed"
+                   and e.payload.get("action_id") == "action-a"]
+    check(len(completed_a) == 1,
+          "one logical action -> one action.completed (a retry is idempotent, no amplification)")
+
+    # (b) a physical call id (tool-level attempt) is NOT action evidence
+    lp_call = analyzer.analyze(kind="semantic", target="brand.palette", target_version=1,
+                               evidence=[{"action_id": "call-1", "outcome": "completed"}],
+                               scope="project/xyz", proposed_by="agent/researcher@1")
+    check(authority.evaluate(lp_call, ncs).verdict == PolicyVerdict.DENY,
+          "a physical call_id is not action evidence (Phase 3 retries cannot feed learning)")
+
     # --- 4. incompatible scope -> DENY -----------------------------------------
     lp_scope = analyzer.analyze(kind="procedure", target="coloring_book.production",
                                 target_version=1, evidence=evidence, scope="project/abc",
