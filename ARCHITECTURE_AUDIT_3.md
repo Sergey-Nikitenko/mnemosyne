@@ -29,7 +29,7 @@ is deliberately separated from "architecture defect."
 | ID | Class | Sev | Summary | Status |
 |---|---|---|---|---|
 | COMP-1 | composition | P1 | `ActionRunner` executes through the raw Executor, not `InstrumentedExecutor` — the agency path emits no `action.requested` before execution, so a crashed action is observably invisible (AD-009 dropped for Phase 8) | **RESOLVED** (8.x) |
-| TIME-1 | temporal | P3 | `MemoryRecord.status` ("retired") exists but nothing sets, honors, or filters on it — retirement is a mechanism gap | OPEN (dormant) |
+| TIME-1 | temporal | P3 | `MemoryRecord.status` ("retired") exists but nothing sets, honors, or filters on it — retirement is a mechanism gap | **RESOLVED** (7.x) |
 | EVENT-1 | event | P3 | `MODEL_SELECTED` is documented "reserved, not yet emitted" but is emitted in the runtime/router path; `MODEL_FALLBACK` is genuinely reserved | OPEN (minor) |
 | COMP-2 | composition | P3 | learning evidence does not distinguish a logical action (`action_id`) from a physical retry (`call_id`) — latent amplification risk if learning ever auto-collects outcomes | OPEN (latent) |
 | EXT-D | expansion | P4 | memory effectiveness (eligible → selected → delivered → followed) is unobservable | OPEN (opportunity) |
@@ -317,7 +317,11 @@ dropped AD-009's "event before complete" instrumentation) is **RESOLVED** by the
 before the side effect, `reconstruct_action` returns `None` (never "failed") for
 an attempt with no terminal event, and federation inherits the guarantee with no
 special patch. The slice also exposed and fixed a latent bug — `reconstruct_action`'s
-"no terminal" fallback previously constructed a broken `ActionResult`.
+"no terminal" fallback previously constructed a broken `ActionResult`. TIME-1
+(retirement) is **RESOLVED** by the 7.x slice: `MemoryStore.retire_if_current` is an
+append-only, freshness-checked lifecycle transition, `list_as_of` projects status
+temporally, and the ContinuityProjector excludes retired records from continuity
+while historical `as_of` projection still reconstructs them.
 
 The second question — *what important question remains that no composition of
 0–10 can answer?* — has one honest candidate: **memory effectiveness** (is

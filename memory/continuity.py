@@ -30,7 +30,10 @@ class ContinuityProjector:
             user=user,
             agent=agent,
             model=model,
-            procedures=memory_store.list_as_of("procedure", as_of),
-            semantic_memories=memory_store.list_as_of("semantic", as_of),
-            preferences=memory_store.list_as_of("preference", as_of),
+            procedures=[p for p in memory_store.list_as_of("procedure", as_of)
+                        if p.status == "active"],
+            semantic_memories=[s for s in memory_store.list_as_of("semantic", as_of)
+                               if s.status == "active"],
+            preferences=[p for p in memory_store.list_as_of("preference", as_of)
+                         if p.status == "active"],
         )

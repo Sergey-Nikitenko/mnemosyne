@@ -42,6 +42,7 @@ class EventType(str):
     APPROVAL_CONSUMED = "approval.consumed"
     MEMORY_CREATED = "memory.created"
     MEMORY_UPDATED = "memory.updated"
+    MEMORY_RETIRED = "memory.retired"
     EVALUATION_COMPLETED = "evaluation.completed"
     RUN_REPLANNED = "run.replanned"
     RUN_COMPLETED = "run.completed"
