@@ -35,6 +35,7 @@ from control.tools import ToolRegistry, ToolSpec
 from execution.action import ActionRunner
 from execution.approvals import ApprovalStore
 from execution.composite import CompositeExecutor
+from execution.continuation import RunContinuationStore
 from execution.durable import DurableEventBus
 from execution.fake import FakeExecutor
 from execution.filesystem import FilesystemToolExecutor
@@ -114,7 +115,7 @@ class MnemosyneSystem:
     def __init__(self, *, config: MnemosyneConfig, runtime, bus, queue, approvals,
                  memory, retriever, tools, policy, executor, authority, runner,
                  projector, analyzer, learning_authority, adaptation,
-                 federation, federated_recorder, console_app) -> None:
+                 federation, federated_recorder, continuation, console_app) -> None:
         self.config = config
         # canonical public members
         self.runtime = runtime
@@ -132,6 +133,7 @@ class MnemosyneSystem:
         self._bus = bus
         self._queue = queue
         self._approvals = approvals
+        self._continuation = continuation
         self._retriever = retriever
         self._tools = tools
         self._policy = policy
@@ -150,6 +152,7 @@ class MnemosyneSystem:
         self._closed = True
         self._queue.close()
         self._approvals.close()
+        self._continuation.close()
         self._bus.close()
         self.memory.close()
 
@@ -173,6 +176,7 @@ class CompositionRoot:
         queue = TaskQueue(queue_path, bus=bus)
         approvals = ApprovalStore(approvals_path, bus=bus)
         memory = MemoryStore(memory_path)
+        continuation = RunContinuationStore(os.path.join(config.workspace, "continuation.db"))
 
         # knowledge
         retriever = ComposedRetriever()
@@ -207,7 +211,8 @@ class CompositionRoot:
                                event_bus=bus, tools=tools, approvals=approvals,
                                policy=policy, worker_id=config.worker_id,
                                max_replans=config.max_replans,
-                               max_tool_rounds=config.max_tool_rounds)
+                               max_tool_rounds=config.max_tool_rounds,
+                               continuation=continuation)
 
         # agency (authority decides; runner executes — never a bypass)
         authority = ContinuityAuthority(capabilities, policy)
@@ -237,4 +242,4 @@ class CompositionRoot:
             projector=projector, analyzer=analyzer,
             learning_authority=learning_authority, adaptation=adaptation,
             federation=federation, federated_recorder=federated_recorder,
-            console_app=console_app)
+            continuation=continuation, console_app=console_app)

@@ -27,8 +27,8 @@ from dataclasses import asdict, dataclass, field
 
 from core.contracts import (
     AgentIdentity, ApprovalRequest, Event, ModelIdentity, ModelRequest,
-    PolicyVerdict, Run, RunManifest, Step, StepStatus, Task, TaskStatus, Trace,
-    UserIdentity, new_id, utcnow,
+    PolicyVerdict, Run, RunManifest, Step, StepStatus, Task, TaskStatus, ToolCall,
+    Trace, UserIdentity, new_id, utcnow,
 )
 from core.events import EventBus, EventType
 from core.state import RunState
@@ -85,7 +85,7 @@ class Orchestrator:
 
     def __init__(self, *, retriever, executor, policy, tools, evaluator,
                  bus=None, approvals=None, run_records=None, max_replans: int = 2,
-                 max_tool_rounds: int = 8) -> None:
+                 max_tool_rounds: int = 8, continuation=None) -> None:
         self.retriever = retriever      # .search(query, filters, k) -> RetrievalResult
         self.executor = executor        # raw capability (FakeExecutor, subprocess, ...)
         self.policy = policy            # PolicyEngine (tool gating)
@@ -99,6 +99,9 @@ class Orchestrator:
         # may run before a terminal model turn. The model may request another
         # round; it never decides that iteration is unbounded.
         self.max_tool_rounds = max_tool_rounds
+        # Durable continuation checkpoint (optional): where an approval-paused run
+        # resumes from, instead of restarting from the original request.
+        self.continuation = continuation
 
     def _model_identity(self) -> ModelIdentity:
         """Which logical model configuration this executor runs — a ModelIdentity
@@ -155,6 +158,7 @@ class Orchestrator:
         def run_tools(tool_calls):
             results = []
             waiting = False
+            pending_call = None
             for call in tool_calls:
                 # Nexus owns the execution identity (AD-012's twin for calls):
                 # re-mint per ATTEMPT, so a replayed/recovered invocation can never
@@ -212,6 +216,7 @@ class Orchestrator:
                                                 "verdict": "approval_required",
                                                 "approval_id": approval.approval_id})
                             waiting = True
+                            pending_call = call
                             break  # pause: the task waits for human approval
                     else:
                         emit(EventType.APPROVAL_REQUIRED, "pending", {"tool": call.tool_name})
@@ -220,7 +225,7 @@ class Orchestrator:
                 else:  # DENY
                     trace.nodes.append({"type": "tool", "tool": call.tool_name,
                                         "verdict": "deny"})
-            return results, waiting
+            return results, waiting, pending_call
 
         def verify(tool_results, attempt):
             evaluation = self.evaluator.evaluate(tool_results=tool_results)
@@ -277,12 +282,37 @@ class Orchestrator:
 
         answer = ""
         attempt = 0
-        while True:  # the replan loop (unchanged)
+        # durable approval continuation: load once — an approval pause RESUMES the
+        # interrupted run; a fresh task (or session/process restart with no pending
+        # approval) starts from the original request.
+        cont = None
+        if self.continuation is not None:
+            cont = self.continuation.load(task.task_id)
+
+        while True:  # the replan loop
             attempt += 1
             retrieved = step("retrieve", do_retrieve)
             conversation: list[dict] = []  # assistant invocations + correlated results
             tool_results: list = []        # every result across rounds, for verification
             rounds = 0
+            pending = None
+            if cont is not None:
+                conversation = cont["conversation"]
+                rounds = cont["rounds"]
+                pending = cont["pending_call"]
+                cont = None  # the checkpoint is consumed by this resume
+            if pending is not None:
+                # approval resumes an INTERRUPTED invocation (exact correlation/
+                # name/args); it never authorizes whatever the model proposes next.
+                pending_tool = ToolCall(tool_name=pending["tool_name"],
+                                        arguments=pending["arguments"],
+                                        correlation_id=pending["correlation_id"])
+                results, _waiting, _pending = step("tool", lambda: run_tools([pending_tool]))
+                tool_results.extend(results)
+                conversation.extend(_tool_follow_up(results))
+                rounds += 1
+                self.continuation.clear(task.task_id)
+
             response = step("model", lambda: do_model(retrieved, conversation))
 
             # iteration, not autonomy: repeat the model -> tools cycle while the
@@ -298,9 +328,16 @@ class Orchestrator:
                     return Outcome(answer="", run=run, trace=trace, live_state=state,
                                    events=list(self.bus.history), manifest=manifest)
                 rounds += 1
-                results, waiting = step("tool", lambda: run_tools(response.tool_calls))
+                results, waiting, pending_call = step(
+                    "tool", lambda: run_tools(response.tool_calls))
                 if waiting:
-                    # the task pauses durably for human approval
+                    if self.continuation is not None:
+                        self.continuation.save(
+                            task.task_id, conversation,
+                            {"tool_name": pending_call.tool_name,
+                             "arguments": dict(pending_call.arguments),
+                             "correlation_id": pending_call.correlation_id},
+                            rounds)
                     trace.nodes.append({"type": "waiting"})
                     return Outcome(answer="", run=run, trace=trace, live_state=state,
                                    events=list(self.bus.history), waiting=True,
