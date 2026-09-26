@@ -87,6 +87,9 @@ class MnemosyneConfig:
     worker_id: str = "worker-1"
     max_replans: int = 2
     max_tool_rounds: int = 8   # orchestration budget: model->tools cycles per attempt
+    # worker recovery lease (Phase 4.11 / AD-053): a CLAIMED task older than this is
+    # stale and recoverable. A configuration choice, never a per-call operator decision.
+    lease_seconds: float = 30.0
     # real reasoning backend (WORK-001): "fake" | "deepseek". The API key is read
     # from a FILE at construction — the key itself never enters this config or any
     # Nexus contract/event. `project_dir` bounds the filesystem tool executor.

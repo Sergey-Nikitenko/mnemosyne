@@ -59,6 +59,10 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="bind host (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000,
                         help="bind port (default 8000)")
+    parser.add_argument("--worker-id", default="worker-1", metavar="ID",
+                        help="worker identity stamped on claims (default worker-1)")
+    parser.add_argument("--lease-seconds", type=float, default=30.0, metavar="SECS",
+                        help="worker recovery lease: a CLAIMED task older than this is stale (default 30)")
     return parser
 
 
@@ -78,6 +82,8 @@ def build_config(args) -> MnemosyneConfig:
         model_name=args.model_name,
         project_dir=args.project_dir,
         max_tool_rounds=args.max_tool_rounds,
+        worker_id=args.worker_id,
+        lease_seconds=args.lease_seconds,
     )
 
 
@@ -98,8 +104,62 @@ def serve(config: MnemosyneConfig, *, host: str = "127.0.0.1", port: int = 8000,
         system.close()  # exactly one close; guaranteed on normal and exceptional exit
 
 
+def worker(config: MnemosyneConfig, *, lease_seconds: float | None = None,
+           poll_seconds: float = 1.0, stop=None, _run_one=None) -> None:
+    """Run a supported worker (OBS-007 / Phase 4.11).
+
+    ONE startup recovery pass (recover stale work using the configured lease), then a
+    bounded drain loop whose ONLY execution primitive is `runtime.run_one()`
+    (claim → run → complete/fail). Idle waiting = a short interruptible sleep when the
+    queue is empty. Graceful termination = `stop` is set: the in-flight `run_one()`
+    completes and no new task is claimed. `close()` writes nothing, so shutdown is
+    observably neutral (an `action.requested` with no terminal survives as
+    attempted/unknown).
+
+    `_run_one` is a test seam (defaults to `system.runtime.run_one`). The worker adds no
+    authority, no heartbeat, no scheduler, and no new execution semantic — recovery policy
+    already exists (AD-019); the worker only decides WHEN to invoke it (once, at startup)."""
+    import threading
+    import time
+
+    from execution.recovery import RecoveryManager
+
+    system = CompositionRoot().build(config)
+    run_one = _run_one or system.runtime.run_one
+    stop = stop if stop is not None else threading.Event()
+    lease = lease_seconds if lease_seconds is not None else config.lease_seconds
+    try:
+        recovered = RecoveryManager(system.runtime.queue, lease).recover()
+        if recovered:
+            print(f"worker: recovered {len(recovered)} stale task(s)")
+        while not stop.is_set():
+            outcome = run_one()
+            if outcome is None:
+                # queue empty -> idle wait (interruptible by the stop signal)
+                stop.wait(poll_seconds)
+        # loop exited via stop: the in-flight run_one() already completed; claim no new task
+    finally:
+        system.close()
+
+
 def main(argv=None) -> int:
+    import signal
+    import threading
+
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "worker":
+        argv = argv[1:]
+        args = _build_parser().parse_args(argv)
+        stop = threading.Event()
+
+        def _handle(signum, frame):
+            stop.set()
+
+        signal.signal(signal.SIGINT, _handle)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, _handle)
+        worker(build_config(args), lease_seconds=args.lease_seconds, stop=stop)
+        return 0
     if argv and argv[0] == "serve":
         argv = argv[1:]  # accept the optional 'serve' subcommand
     args = _build_parser().parse_args(argv)
