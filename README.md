@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (60 golden + conformance tests)
+# Run the entire suite (61 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -78,6 +78,7 @@ python tests/golden/test_phase7_handoff.py          # model handoff: continuity 
 python tests/golden/test_phase8_capability.py       # authority: the model proposes, Nexus decides
 python tests/golden/test_phase8_execution.py        # controlled execution: ALLOW runs, DENY/APPROVAL never execute
 python tests/golden/test_phase8_lifecycle.py        # lifecycle/idempotency: same action runs at most once
+python tests/golden/test_phase9_learning_proposal.py # learning proposals: observe, never mutate
 ```
 
 ---
@@ -106,6 +107,12 @@ action is authoritative, never auto-retried (8.3). The invariant: *models may
 propose actions; Nexus alone authorizes, executes, records, and reconstructs
 their authoritative outcomes — a logical action has a Nexus-owned identity, and
 its history is never rewritten.*
+
+**Phase 9.1 shipped.** The learning plane opens with the epistemic boundary: a
+pure `LearningAnalyzer` observes authoritative experience and returns a
+`LearningProposal` — a versioned, evidence-grounded candidate adaptation. It is a
+value object, never a mutation: no `LearningAuthority` yet, and no observation,
+score, or confidence value may directly change memory, identity, or history.
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

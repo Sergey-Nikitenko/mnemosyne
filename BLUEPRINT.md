@@ -1193,6 +1193,43 @@ Compensation is a new authoritative action, not a rewrite (AD-043): no
 CompensationPlanner / UndoManager / special execution mechanism until a concrete
 capability demands one.
 
+### Phase 9 — learning / adaptation
+
+Phase 8 proved Nexus can turn reasoning into controlled action; Phase 9 asks what
+should *change* because of what happened. The governing rule is **proposal before
+mutation**: experience may produce a versioned, evidence-grounded candidate
+adaptation, but no observation, model output, score, or confidence value may
+directly modify authoritative state.
+
+### Phase 9.1 — learning proposals (the epistemic boundary)
+
+Can Nexus derive a proposed adaptation from authoritative experience without
+changing authoritative memory, identity, policy, or history (AD-044)?
+
+    authoritative experience -> observe -> LearningProposal -> X (NO MUTATION)
+
+- **One contract earns its place: `LearningProposal`.** It carries a Nexus-owned
+  `proposal_id` (never the identity of a future memory version), the MemoryStore
+  `kind` (no learning-specific enum), the exact `target` + `target_version`
+  observed, a `proposed_change` (candidate data), `evidence` (references to
+  Nexus-owned artifacts), `scope`, and `proposed_by` (the interpreter).
+- **No LearningAuthority yet.** Observation produces a proposal; nothing accepts
+  it. A proposal with confidence 0.9999 is still a proposal.
+- **The source is authoritative experience.** Evidence references action_id /
+  run_id / memory versions — not a copied transcript. Models may interpret
+  experience; Nexus owns the experience being interpreted.
+- **The strongest invariant: observation cannot mutate.** The analyzer receives
+  evidence references and a scalar target version — never a MemoryStore — and its
+  output is a value object that never enters the NCS as accepted knowledge.
+- **Stale-target awareness starts here.** A proposal pins the version it observed;
+  a later legitimate vN+1 does not retarget it (conflict resolution is 9.2).
+- **Proposals are not yet event-sourced.** A value object returned by the learner
+  is enough; a durable proposal lifecycle earns an event when 9.2 needs it.
+
+Proven by `tests/golden/test_phase9_learning_proposal.py` (proposal-not-mutation,
+evidence-grounded, target-versioned, scope-preserving, model non-authority,
+continuity isolation, temporal stability).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1259,6 +1296,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-041** — Action execution is gated by the authority and recorded as an authoritative, reconstructible event: only an ALLOW verdict reaches the Executor (DENY / APPROVAL_REQUIRED never execute); the outcome is an `ActionResult` (distinct from `ActionVerdict`); and a successful execution emits a bounded `action.completed` event carrying enough provenance (who/capability/parameters/run/task/when/result) to reconstruct the completion deterministically. Execution never silently becomes learning.
 - **AD-042** — An action's identity is its `action_id` — the idempotency key, distinct from run/task/provider ids. The same id is the same logical action and executes at most once from Nexus's perspective: a retry returns the reconstructed authoritative terminal outcome (completed or failed) without re-executing, and a failed action is never auto-retried. A new id is a new logical action. Terminal outcomes are authoritative, reconstructible events; failure is a known outcome, never a trigger for learning or history rewrite.
 - **AD-043** — Compensation is a new authoritative action, never a rewrite. A corrective operation is proposed, authorized, executed, and recorded exactly like any other action — with its own identity — so the event log records `A.completed` then `B.completed`, never a rewritten A. No CompensationPlanner, UndoManager, or special execution mechanism is introduced until a concrete capability demands one.
+- **AD-044** — Learning is proposal before mutation: experience may produce a versioned, evidence-grounded candidate adaptation, but no observation, model output, score, or confidence value may directly modify authoritative state.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1370,6 +1408,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Capability/authority boundary (8.1): model proposes; a model-independent, continuity-aware authority decides | `tests/golden/test_phase8_capability.py` |
 | Controlled action execution (8.2): ALLOW is the only execution path; the existing Executor executes; completion reconstructs | `tests/golden/test_phase8_execution.py` |
 | Action lifecycle / idempotency (8.3): same action_id executes at most once; failure is authoritative and not auto-retried | `tests/golden/test_phase8_lifecycle.py` |
+| Learning proposals (9.1): observation produces a bounded, evidence-grounded proposal without mutation | `tests/golden/test_phase9_learning_proposal.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

@@ -12,7 +12,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE_LAYERS = ("core", "control", "execution", "memory", "observability", "apps")
+CORE_LAYERS = ("core", "control", "execution", "memory", "observability", "learning", "apps")
 
 PROVIDERS = {
     "chromadb", "qdrant", "weaviate", "pinecone", "pgvector", "faiss",

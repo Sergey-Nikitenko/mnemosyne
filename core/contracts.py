@@ -431,6 +431,43 @@ class ActionResult:
 
 
 @dataclass
+class LearningProposal:
+    """A proposed adaptation, derived from authoritative experience (AD-044).
+
+    A PROPOSAL, never a mutation: it writes nothing, changes no authoritative
+    memory/identity/policy/history, and never appears in the NCS as learned
+    knowledge. `kind` is the MemoryStore kind ("procedure" / "semantic" /
+    "preference") — no learning-specific enum. `target` + `target_version` name
+    the EXACT authoritative version observed (a later version does not retarget
+    it). `evidence` references Nexus-owned artifacts (action_id, run_id, memory
+    version) — not a copied transcript. `proposed_by` is the interpreter (a model
+    or agent), never the authority."""
+    kind: str
+    target: str
+    target_version: int
+    proposed_change: dict[str, Any]
+    evidence: list[dict[str, Any]]
+    scope: str = ""
+    proposed_by: str = ""
+    proposal_id: str = field(default_factory=lambda: new_id("lrn"))
+    created_at: datetime = field(default_factory=utcnow)
+
+
+class LearningAnalyzer(Protocol):
+    """The learner boundary: authoritative experience -> LearningProposal (AD-044).
+
+    A pure, replaceable interpreter. It OBSERVES authoritative experience
+    (evidence references) and produces a bounded candidate adaptation — a value
+    object, never authoritative state. It never reads or writes a MemoryStore,
+    never mutates the NCS, never emits.
+    """
+
+    def analyze(self, *, kind: str, target: str, target_version: int,
+                evidence: list[dict[str, Any]], scope: str = "",
+                proposed_by: str = "") -> LearningProposal: ...
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""
