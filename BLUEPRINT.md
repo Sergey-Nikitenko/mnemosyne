@@ -817,6 +817,53 @@ CLI→config translation, exactly one build/close, existing-console-only serving
 config-driven model swap, no startup side effects, closure on exceptional
 shutdown, and AD-050 through the serve lifecycle.*
 
+### Phase 4.11 — the supported worker + recovery surface (OBS-007, post-freeze)
+
+OBS-007 is the same promotion shape as OBS-001: the durable-execution/recovery machinery
+exists and is proven (Phases 3.6, 3.7, 5.x), but ordinary operation still requires
+hand-wiring `run_one()` + `RecoveryManager` + a lease threshold. This slice owns that
+wiring as a Phase-4 operator surface — a lifecycle surface, NOT a new phase, NOT authority.
+
+    mnemosyne <worker|run> -> drain loop + recovery duty -> Worker(queue, orchestrator)
+                              -> claim -> run -> complete/fail -> recover(abandoned)
+
+- **The worker process is the existing `Worker` under a bounded drain loop.** `run_one()`
+  (claim → run → complete/fail) stays the ONLY drain primitive; the surface adds the loop
+  and the stop, not a second execution path.
+- **Clean termination.** On a stop signal the worker finishes the IN-FLIGHT `run_one()`
+  (a task is never left CLAIMED on a clean stop) and claims no new task. Hard death mid-run
+  is the crash case, owned by recovery (3.7), never by the shutdown path.
+- **Liveness is the claim lease, not a heartbeat.** `claimed_at` (AD-019) is the liveness
+  evidence; no heartbeat/refresh is invented — the lease already answers "is this worker
+  still alive?".
+- **Recovery is a duty the surface owns.** The existing lease rule (`CLAIMED` +
+  `claimed_at < now − lease` → requeue; AD-019) is invoked by the surface — on worker start
+  and/or a declared schedule — with `lease_seconds` a CONFIGURATION choice, never a
+  per-call operator decision.
+- **Interrupted state is projected, never fabricated.** A worker that died mid-action leaves
+  `action.requested` with no terminal (AD-050); recovery re-claims the TASK while the action
+  stays attempted/unknown — `reconstruct_action` returns None, no terminal is manufactured,
+  and the same `action_id` is never auto-re-executed (AD-042).
+- **Idempotent resumption, composed not weakened.** Task delivery is at-least-once
+  (AD-018): re-running a recovered task may execute a NEW `action_id`, and a physical side
+  effect may recur. Action identity is at-most-once (AD-042): a terminal `action_id`
+  reconstructs without re-executing; an attempted/unknown `action_id` is not auto-re-run.
+- **Topology stays open at the contract level.** The slice specifies the INTERFACE (drain
+  loop + recovery duty + clean termination + projection), not whether it ships as
+  `mnemosyne worker`, `mnemosyne run` (a supervisor of serve + workers), or both — chosen by
+  further operation.
+- **No authority, no new execution model, no scheduler, no heartbeat.** The surface commands
+  the queue and composes the frozen `Worker`; it never authorizes, never executes a
+  capability, never reinterprets events, and never invents a liveness or scheduling
+  mechanism the frozen guarantees already provide.
+
+**Phase 4.11 acceptance (the implementation must earn it):**
+`tests/conformance/test_worker_surface.py` — clean shutdown completes the in-flight task and
+claims no new one; crash mid-action survives rebuild as attempted/unknown; recovery
+re-claims with generation N+1 and does NOT re-execute the same `action_id`; a terminal
+`action_id` reconstructs without a second execution; a recovered task may execute a NEW
+`action_id`; and CLI / REST / worker agree on the same durable task status.
+
 ### Phase 5 — Hardening
 
 **Headline guarantee:** *Nexus guarantees atomic authorization and ownership
@@ -1631,6 +1678,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-050** — An authorized logical action becomes an observable attempt before execution begins: `action.requested` is durably recorded before the Executor may cause a side effect, terminal events record only observed completion or failure, and the absence of a terminal event remains an unknown outcome rather than a failure verdict.
 - **AD-051** — Memory retirement is an append-only temporal transition, not deletion or content revision: from its retirement point forward a retired memory no longer participates in continuity, while its prior versions and pre-retirement projections remain reconstructible; retirement is freshness-checked at the authoritative write boundary and never silently reactivates through ordinary updates.
 - **AD-052** — The supported composition root owns construction and lifecycle, never authority: explicit configuration (`MnemosyneConfig`, choices only, never components) constructs one canonical system whose dependencies and lifecycle are internally owned; the root may configure/instantiate/connect/start/stop existing frozen components but may not authorize, mutate authoritative memory directly, reinterpret events, manufacture outcomes, or bypass the Action/Learning/Federation boundaries; shutdown is observably neutral (never fabricates a terminal outcome).
+- **AD-053** — A supported worker/recovery surface owns the drain loop and recovery duty as an operator lifecycle, never authority: the worker process is the existing `Worker` (claim → run → complete/fail) under a bounded drain loop with clean-termination semantics (finish the in-flight task, claim no new one); liveness is the claim lease (`claimed_at`, AD-019) — no heartbeat is invented; recovery is the existing lease rule invoked as a surface-owned duty (on worker start and/or a declared schedule) with `lease_seconds` a configuration choice, never a per-call operator decision; and interrupted state is projected, never fabricated — an `action.requested` with no terminal stays attempted/unknown and its `action_id` is never auto-re-executed (AD-042). The surface composes the frozen queue/worker/recovery guarantees (AD-017/018/019/027/028/032/042/050), adds no authority, no new execution model, no scheduler, and no topology decision.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
