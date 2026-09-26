@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .contracts import ActionResult, Event, Run, Step, StepStatus, Task, TaskStatus
+from .contracts import ActionResult, Event, FederatedOutcome, Run, Step, StepStatus, Task, TaskStatus
 
 
 @dataclass
@@ -131,4 +131,26 @@ def reconstruct_action(action_id: str, events: list[Event]) -> ActionResult:
         run_id=match.run_id,
         task_id=match.task_id,
         completed_at=match.timestamp.isoformat(),
+    )
+
+
+def reconstruct_federated_outcome(delegation_id: str,
+                                  events: list[Event]) -> FederatedOutcome | None:
+    """Project a delegation's recorded remote outcome from its authoritative
+    `federation.outcome.received` event. Returns None if no receipt exists."""
+    match = None
+    for ev in events:
+        if ev.event_type == "federation.outcome.received" \
+                and ev.payload.get("delegation_id") == delegation_id:
+            match = ev
+    if match is None:
+        return None
+    return FederatedOutcome(
+        delegation_id=delegation_id,
+        peer_id=match.payload.get("peer_id", ""),
+        status=match.payload.get("status", ""),
+        remote_action_id=match.payload.get("remote_action_id", ""),
+        output=match.payload.get("output"),
+        error=match.payload.get("error"),
+        provenance=match.payload.get("provenance", {}),
     )

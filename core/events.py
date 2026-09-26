@@ -49,6 +49,8 @@ class EventType(str):
     # Phase 8 (agency): an allowed action's terminal outcomes.
     ACTION_COMPLETED = "action.completed"
     ACTION_FAILED = "action.failed"
+    # Phase 10 (federation): A's authoritative receipt of B's reported outcome.
+    FEDERATION_OUTCOME_RECEIVED = "federation.outcome.received"
 
 
 Handler = Callable[[Event], None]

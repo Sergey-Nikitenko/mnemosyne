@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (65 golden + conformance tests)
+# Run the entire suite (66 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -83,6 +83,7 @@ python tests/golden/test_phase9_learning_authority.py # learning authority: ALLO
 python tests/golden/test_phase9_adaptation.py         # authorized adaptation: compare-and-append, exactly-once
 python tests/golden/test_phase10_federation_peer.py    # federation identity: representation before trust
 python tests/golden/test_phase10_delegation.py         # federated delegation: a bounded request, never authority
+python tests/golden/test_phase10_federated_outcome.py   # federated outcome: A records "B reported X", never "A observed X"
 ```
 
 ---
@@ -129,6 +130,13 @@ is checked explicitly; no crypto, no transport dependency.
 sending via A's own authority; a `DelegationReceiver` independently accepts or
 refuses via B's own authority. A `DelegationVerdict.ALLOW` means "accepted in
 principle" — nothing executes, no shared state, no authority transit.
+
+**Phase 10 complete (frozen).** Federated outcome closes the loop: B executes an
+accepted delegation through its own Phase 8 machinery and reports a bounded
+`FederatedOutcome`; A records only `federation.outcome.received` — "B reported X",
+never "A observed X". The invariant: *federation connects independent authority
+domains without merging them — identity, authorization, execution, state, and
+authoritative history remain locally owned.*
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

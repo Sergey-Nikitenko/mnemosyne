@@ -556,6 +556,22 @@ class DelegationVerdict:
     reasons: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class FederatedOutcome:
+    """A bounded record of what another authority domain REPORTS happened in
+    response to a delegation (AD-049). It is NOT an ActionResult: it is the
+    receiving domain's record of a remote report — "B reported X", never "A
+    observed X". `status` is "reported_success" | "reported_failure".
+    `remote_action_id` is the peer's local action identity, an opaque reference."""
+    delegation_id: str
+    peer_id: str
+    status: str
+    remote_action_id: str = ""
+    output: Any = None
+    error: str | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and

@@ -1371,6 +1371,37 @@ Proven by `tests/golden/test_phase10_delegation.py` (outbound gate, independent
 inbound authority, refusal, self-authorization rejection, outbound bypass, scope
 rejection, no execution, and state isolation).
 
+### Phase 10.3 — federated outcome
+
+When B executes an accepted delegation, what may A truthfully record (AD-049)?
+
+    B ActionResult -> federation translation -> FederatedOutcome -> A receipt
+
+- **Report ≠ observation.** A records "B reported X", never "A observed X":
+  `FederatedOutcome` is a bounded remote report, and A's event is
+  `federation.outcome.received` — never a copy of B's `action.completed`.
+- **B composes Phase 8.** `DelegationService` (`federation/outcome.py`) executes an
+  accepted delegation through B's own ActionRunner (re-authorizing at execution
+  time — a stale ALLOW never bypasses current authority), and translates the
+  ActionResult. B mints its own action identity; A never assigns one.
+- **Exactly-once local receipt, conflict-preserving.** `FederatedOutcomeRecorder`
+  records one `federation.outcome.received` per delegation_id (deterministic event
+  id); a duplicate is idempotent, a conflicting report is rejected — history is
+  never rewritten.
+- **No authority/mutation injection.** Remote output is recorded only as bounded
+  data; it never mutates A's authority, memory, NCS, actions, or learning.
+- **Independent histories.** B's `action.completed` stays authoritative in B; A's
+  `federation.outcome.received` stays authoritative in A; neither is copied.
+
+Proven by `tests/golden/test_phase10_federated_outcome.py` (report≠observation,
+stale-authorization, duplicate receipt, conflict rejection, no injection,
+independent histories).
+
+**Phase 10 is complete and frozen** — 10.1 represent → 10.2 delegate → 10.3 report.
+The invariant: *federation connects independent authority domains without merging
+them — peers exchange bounded claims, requests, and reports, while identity,
+authorization, execution, state, and authoritative history remain locally owned.*
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1442,6 +1473,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-046** — Adaptation is an authorized, compare-and-append transition: only a currently permitted proposal may create exactly one new authoritative memory version, with provenance to its prior version and evidence; stale authorization never mutates state, and history is never rewritten.
 - **AD-047** — Federation begins with independent authority domains: a remote Nexus may declare identity, compatibility, and capability claims, but those declarations never become local authority or shared state; only explicitly bounded information crosses the federation boundary.
 - **AD-048** — Delegation transfers a bounded request, never authority: the requesting Nexus must authorize sending it, the receiving Nexus independently decides whether to accept it, and neither peer's claims, permissions, or identities confer authority inside the other domain.
+- **AD-049** — A federated outcome is an authoritative record of what a peer reported, not a promotion of the peer's execution into local fact: the executing Nexus owns its action and history, the receiving Nexus owns only the durable receipt, duplicate reports are idempotent, conflicting reports never rewrite history, and remote output confers no local authority or mutation.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1558,6 +1590,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Authorized adaptation (9.3): revalidated, compare-and-append, exactly-once, append-only, provenance-preserving | `tests/golden/test_phase9_adaptation.py` |
 | Federation identity / claims (10.1): representation before trust; remote claims never become local authority or shared state | `tests/golden/test_phase10_federation_peer.py` |
 | Federated delegation (10.2): a bounded request crosses, authority never does; nothing executes | `tests/golden/test_phase10_delegation.py` |
+| Federated outcome (10.3): A records "B reported X", never "A observed X"; exactly-once receipt, conflict-preserving, independent histories | `tests/golden/test_phase10_federated_outcome.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |
