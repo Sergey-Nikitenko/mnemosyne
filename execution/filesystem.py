@@ -48,6 +48,8 @@ class FilesystemToolExecutor:
                 return self._list(call, args)
             if call.tool_name == "read_file":
                 return self._read(call, args)
+            if call.tool_name == "edit_file":
+                return self._edit(call, args)
             if call.tool_name == "write_file":
                 return self._write(call, args)
             if call.tool_name == "run_command":
@@ -81,6 +83,37 @@ class FilesystemToolExecutor:
         return ToolResult(tool_call=call, success=True,
                           output={"path": str(target.relative_to(self._root)),
                                   "content": data.decode("utf-8", errors="replace")})
+
+    def _edit(self, call, args):
+        rel = args.get("path", "")
+        old = args.get("old_string", "")
+        new = args.get("new_string", "")
+        if not rel:
+            return ToolResult(tool_call=call, success=False, output={},
+                              error="edit_file requires a path")
+        if not old:
+            return ToolResult(tool_call=call, success=False, output={},
+                              error="edit_file requires old_string")
+        target = self._resolve(rel)
+        if target is None:
+            return ToolResult(tool_call=call, success=False, output={},
+                              error="path outside project")
+        if not target.is_file():
+            return ToolResult(tool_call=call, success=False, output={},
+                              error=f"not a file: {rel}")
+        content = target.read_bytes().decode("utf-8", errors="replace")
+        count = content.count(old)
+        if count == 0:
+            return ToolResult(tool_call=call, success=False, output={},
+                              error="old_string not found")
+        if count > 1:
+            return ToolResult(tool_call=call, success=False, output={},
+                              error=f"old_string appears {count} times; use a larger unique string")
+        new_content = content.replace(old, new, 1)
+        target.write_bytes(new_content.encode("utf-8"))
+        return ToolResult(tool_call=call, success=True,
+                          output={"path": str(target.relative_to(self._root)),
+                                  "bytes": len(new_content.encode("utf-8"))})
 
     def _write(self, call, args):
         rel = args.get("path", "")
