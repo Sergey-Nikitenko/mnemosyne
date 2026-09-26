@@ -97,13 +97,15 @@ documented in [`BLUEPRINT.md`](BLUEPRINT.md)).
 Phase 7 is the proof milestone for Mnemosyne's central claim: Nexus owns identity,
 memory, continuity, and state; models are pluggable reasoning backends.
 
-**Phase 8.3 shipped.** The capability/agency plane now has a full lifecycle:
-a model proposes an `ActionRequest`; a continuity-aware `ContinuityAuthority`
-returns an `ActionVerdict` (8.1); an `ActionRunner` executes an ALLOWed action
-through the existing `Executor` and records `action.completed` / `action.failed`
-(8.2); and the `action_id` is the idempotency key — the same logical action
-executes at most once, and a failed action is authoritative, never auto-retried
-(8.3).
+**Phase 8 complete (frozen).** The capability/agency plane: a model proposes an
+`ActionRequest`; a continuity-aware `ContinuityAuthority` returns an `ActionVerdict`
+(8.1); an `ActionRunner` executes an ALLOWed action through the existing `Executor`
+and records `action.completed` / `action.failed` (8.2); and the `action_id` is the
+idempotency key — the same logical action executes at most once, and a failed
+action is authoritative, never auto-retried (8.3). The invariant: *models may
+propose actions; Nexus alone authorizes, executes, records, and reconstructs
+their authoritative outcomes — a logical action has a Nexus-owned identity, and
+its history is never rewritten.*
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

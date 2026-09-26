@@ -1185,6 +1185,14 @@ auto-retry).
 Still frozen out: automatic retries, autonomous recovery, compensation planning,
 new persistence, learning from outcomes. Execution is data; learning is Phase 9.
 
+**Phase 8 is complete and frozen** — 8.1 authority → 8.2 execution → 8.3
+lifecycle/idempotency. The invariant: *models may propose actions; Nexus alone
+authorizes, executes, records, and reconstructs their authoritative outcomes — a
+logical action has a Nexus-owned identity, and its history is never rewritten.*
+Compensation is a new authoritative action, not a rewrite (AD-043): no
+CompensationPlanner / UndoManager / special execution mechanism until a concrete
+capability demands one.
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1250,6 +1258,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-040** — The authority that validates a proposed action is a pure, model-independent, continuity-aware function of (proposal, NCS, policy): `Authority.evaluate(action, ncs) -> ActionVerdict`. The model proposes; the authority decides; the executor executes; events record. The verdict never reads the proposing model's identity, reads durable continuity (preferences scoped to the action) to refine the static risk gate, ignores the model's self-assertions, and never executes or emits. Static DENY (destructive/denylist) is final — continuity refines, never overrides the reflex arc.
 - **AD-041** — Action execution is gated by the authority and recorded as an authoritative, reconstructible event: only an ALLOW verdict reaches the Executor (DENY / APPROVAL_REQUIRED never execute); the outcome is an `ActionResult` (distinct from `ActionVerdict`); and a successful execution emits a bounded `action.completed` event carrying enough provenance (who/capability/parameters/run/task/when/result) to reconstruct the completion deterministically. Execution never silently becomes learning.
 - **AD-042** — An action's identity is its `action_id` — the idempotency key, distinct from run/task/provider ids. The same id is the same logical action and executes at most once from Nexus's perspective: a retry returns the reconstructed authoritative terminal outcome (completed or failed) without re-executing, and a failed action is never auto-retried. A new id is a new logical action. Terminal outcomes are authoritative, reconstructible events; failure is a known outcome, never a trigger for learning or history rewrite.
+- **AD-043** — Compensation is a new authoritative action, never a rewrite. A corrective operation is proposed, authorized, executed, and recorded exactly like any other action — with its own identity — so the event log records `A.completed` then `B.completed`, never a rewritten A. No CompensationPlanner, UndoManager, or special execution mechanism is introduced until a concrete capability demands one.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
