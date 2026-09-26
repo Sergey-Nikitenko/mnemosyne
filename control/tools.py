@@ -28,8 +28,8 @@ class ToolRegistry:
     def register(self, spec: ToolSpec) -> None:
         self._tools[spec.name] = spec
 
-    def get(self, name: str) -> ToolSpec:
-        return self._tools[name]
+    def get(self, name: str) -> ToolSpec | None:
+        return self._tools.get(name)
 
     def list(self) -> list[ToolSpec]:
         return list(self._tools.values())

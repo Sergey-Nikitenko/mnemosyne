@@ -28,7 +28,7 @@ from dataclasses import asdict, dataclass, field
 from core.contracts import (
     ActionRequest, AgentIdentity, ApprovalRequest, Event, ModelIdentity,
     ModelRequest, PolicyVerdict, Run, RunManifest, Step, StepStatus, Task,
-    TaskStatus, ToolCall, Trace, UserIdentity, new_id, utcnow,
+    TaskStatus, ToolCall, ToolResult, Trace, UserIdentity, new_id, utcnow,
 )
 from core.events import EventBus, EventType
 from core.state import RunState
@@ -300,6 +300,19 @@ class Orchestrator:
                 # a replayed invocation is a distinct physical call (call_id = C).
                 call.call_id = new_id("call")
                 spec = self.tools.get(call.tool_name)
+                if spec is None:
+                    # A model-hallucinated tool name degrades to a tool failure the
+                    # model can recover from, never a worker crash.
+                    result = ToolResult(tool_call=call, success=False,
+                                        error=f"unknown tool: {call.tool_name}")
+                    emit(EventType.POLICY_DECISION, "denied", {
+                        "tool": call.tool_name, "verdict": "unknown",
+                        "reason": "unknown tool", "call_id": call.call_id,
+                    })
+                    trace.nodes.append({"type": "tool", "tool": call.tool_name,
+                                        "verdict": "unknown"})
+                    results.append(result)
+                    continue
                 if self.action_runner is not None:
                     result, waiting, pending = _agency_call(call, spec)
                 else:
