@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (69 golden + conformance tests)
+# Run the entire suite (70 golden + conformance tests)
 python scripts/check.py
 ```
 

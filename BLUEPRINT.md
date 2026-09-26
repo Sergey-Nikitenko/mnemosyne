@@ -757,6 +757,39 @@ the same `NexusRuntime`, the same contracts, and the same event projections.
 passes — dependency graph, event taxonomy, state/event transition graphs,
 concurrency semantics, and public-contract compatibility.
 
+### Phase 4.9 — the supported composition root (OBS-001, post-freeze)
+
+The Operator Console's operational sessions proved the components compose, but
+every caller had to hand-wire the 0-9 dependency graph (17+ objects, four store
+paths, a shared-EventBus invariant, a shared-MemoryStore invariant). One supported
+boundary now owns that wiring — a Phase-4 surface, not a new phase:
+
+    MnemosyneConfig -> CompositionRoot.build(config) -> MnemosyneSystem (owns lifecycle)
+
+- **Configuration ≠ composition.** `MnemosyneConfig` is frozen data — the
+  operator's choices (workspace, identities, model selection, policy, tools,
+  corpus, runtime knobs) — never constructed components. The root derives the four
+  store paths deterministically from one `workspace` directory.
+- **The root owns construction and lifecycle, never authority (AD-052).** It may
+  configure, instantiate, connect, start, and close existing frozen components; it
+  never authorizes, mutates authoritative memory directly, reinterprets events,
+  manufactures outcomes, or bypasses the Action/Learning/Federation boundaries.
+  `MnemosyneSystem.close()` is one idempotent call and writes nothing — shutdown
+  stays observably neutral (an `action.requested` with no terminal survives
+  close/rebuild as attempted/unknown, never a fabricated failure).
+- **Federation is constructed, not activated:** the root makes `Federation` and
+  `FederatedOutcomeRecorder` available with no peer discovery or network.
+- **No service locator:** the system exposes the canonical members, owns the rest
+  privately, and is not a mutable dependency dictionary.
+- **Layer integrity holds:** the root lives in `apps/` (the top layer) and composes
+  0-10 without weakening any existing import/provider-purity gate.
+
+**Phase 4.9 acceptance:** *`tests/golden/test_phase4_composition.py` proves ten
+properties — one supported construction path, config ≠ composition, shared-state
+correctness, plumbing-never-authority, frozen paths remaining mandatory, durable
+reconstruction, config-driven model swap, one idempotent close(), console
+coherence, and the AD-050 negative assertion through close()/rebuild.*
+
 ### Phase 5 — Hardening
 
 **Headline guarantee:** *Nexus guarantees atomic authorization and ownership
@@ -1570,6 +1603,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-049** — A federated outcome is an authoritative record of what a peer reported, not a promotion of the peer's execution into local fact: the executing Nexus owns its action and history, the receiving Nexus owns only the durable receipt, duplicate reports are idempotent, conflicting reports never rewrite history, and remote output confers no local authority or mutation.
 - **AD-050** — An authorized logical action becomes an observable attempt before execution begins: `action.requested` is durably recorded before the Executor may cause a side effect, terminal events record only observed completion or failure, and the absence of a terminal event remains an unknown outcome rather than a failure verdict.
 - **AD-051** — Memory retirement is an append-only temporal transition, not deletion or content revision: from its retirement point forward a retired memory no longer participates in continuity, while its prior versions and pre-retirement projections remain reconstructible; retirement is freshness-checked at the authoritative write boundary and never silently reactivates through ordinary updates.
+- **AD-052** — The supported composition root owns construction and lifecycle, never authority: explicit configuration (`MnemosyneConfig`, choices only, never components) constructs one canonical system whose dependencies and lifecycle are internally owned; the root may configure/instantiate/connect/start/stop existing frozen components but may not authorize, mutate authoritative memory directly, reinterpret events, manufacture outcomes, or bypass the Action/Learning/Federation boundaries; shutdown is observably neutral (never fabricates a terminal outcome).
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1661,6 +1695,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Dashboard: disposable projection consumer — decisions/attempts/recovery/interruption, no authority | `tests/golden/test_phase4_dashboard.py` |
 | CLI: thin surface adapter — same async ask + same projected views as REST/WS/dashboard | `tests/golden/test_phase4_cli.py` |
 | Operator Console: projection-only — identities/NCS/approvals/events/action-lifecycle read-only; interrupted action is attempted/unknown, never failed; REST/CLI/raw state agree | `tests/conformance/test_console_surface.py` |
+| Supported composition root (4.9): config constructs the canonical topology; config ≠ composition; shared-state correctness; plumbing-never-authority; frozen paths; reconstruction; model swap; one idempotent close; console coherence; AD-050 through close | `tests/golden/test_phase4_composition.py` |
 | Atomic approval consumption: two workers race, exactly one executes (single-use) | `tests/golden/test_phase5_concurrency.py` |
 | Hardening: per-call tool identity, event-sourced approval, terminal step semantics, atomic recovery, dead-event cleanup | `tests/golden/test_phase5_hardening.py` |
 | Per-worker connections + deliberate SQLite policy (5.2): one connection per thread, busy_timeout/WAL, concurrent independent work | `tests/golden/test_phase5_connections.py` |
