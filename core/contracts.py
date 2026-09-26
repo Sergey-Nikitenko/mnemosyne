@@ -468,6 +468,30 @@ class LearningAnalyzer(Protocol):
 
 
 @dataclass
+class LearningVerdict:
+    """The learning authority's answer to a LearningProposal (AD-045).
+
+    `verdict` reuses PolicyVerdict (ALLOW / DENY / APPROVAL_REQUIRED); `reasons`
+    records WHY — evidence authenticity, target freshness, scope, policy kind.
+    The authority returns this and mutates nothing: ALLOW is permission, never
+    adaptation."""
+    verdict: PolicyVerdict
+    reasons: list[str] = field(default_factory=list)
+
+
+class LearningAuthority(Protocol):
+    """The learning-authority boundary: (LearningProposal, NCS) -> LearningVerdict (AD-045).
+
+    A pure, deterministic decision. It evaluates a proposal's evidence (against
+    authoritative history), target freshness, and scope — never the proposer's
+    identity or the proposal's self-claims — and returns a verdict. It never
+    mutates: an ALLOW verdict is permission, not adaptation.
+    """
+
+    def evaluate(self, proposal: LearningProposal, ncs: NexusContinuityState) -> LearningVerdict: ...
+
+
+@dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and
     `model.completed` can unambiguously belong to the same run/step."""

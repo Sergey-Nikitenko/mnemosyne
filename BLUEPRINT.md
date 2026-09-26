@@ -1230,6 +1230,38 @@ Proven by `tests/golden/test_phase9_learning_proposal.py` (proposal-not-mutation
 evidence-grounded, target-versioned, scope-preserving, model non-authority,
 continuity isolation, temporal stability).
 
+### Phase 9.2 — learning authority (the authorization boundary)
+
+Should this specific, evidence-grounded proposal be permitted to become
+authoritative (AD-045)?
+
+    LearningProposal -> LearningAuthority -> LearningVerdict -> X (NO MUTATION)
+
+- **Authority is distinct from analysis.** 9.1 answers "what change does the
+  evidence suggest?"; 9.2 answers "may that change be applied?" — and stops at the
+  verdict. `LearningVerdict` reuses `PolicyVerdict` (ALLOW/DENY/APPROVAL_REQUIRED)
+  + reasons; no adaptation occurs here.
+- **Evidence authenticity.** `GroundedLearningAuthority` (`learning/authority.py`)
+  verifies cited action_ids against authoritative history — a fabricated or
+  nonexistent reference is DENY. A proposal cannot self-authorize.
+- **Target freshness.** A proposal whose target version is no longer current is
+  DENY (`stale_target`), never silently rebased: generate a fresh proposal against
+  the current version.
+- **Scope enforcement.** The proposal must be scoped to the target's exact scope;
+  a mismatch is DENY (never silently broadened — project-local evidence cannot
+  become global learning).
+- **Proposer non-authority.** The verdict reads only (evidence, freshness, scope,
+  kind); `proposed_by`, confidence, and self-claims are ignored.
+- **Policy-controlled verdict.** A configurable kind-based `LearningPolicyRules`
+  determines ALLOW/DENY/APPROVAL_REQUIRED (default: semantic → ALLOW, procedure /
+  preference → APPROVAL_REQUIRED) — the analyzer never decides its own policy.
+- **ALLOW is permission, not mutation.** Every verdict — including ALLOW — leaves
+  memory, NCS, identity, proposal, and history untouched.
+
+Proven by `tests/golden/test_phase9_learning_authority.py` (all three verdicts,
+evidence authenticity, target freshness, scope enforcement, non-self-authorization,
+purity, and proposal immutability).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1297,6 +1329,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-042** — An action's identity is its `action_id` — the idempotency key, distinct from run/task/provider ids. The same id is the same logical action and executes at most once from Nexus's perspective: a retry returns the reconstructed authoritative terminal outcome (completed or failed) without re-executing, and a failed action is never auto-retried. A new id is a new logical action. Terminal outcomes are authoritative, reconstructible events; failure is a known outcome, never a trigger for learning or history rewrite.
 - **AD-043** — Compensation is a new authoritative action, never a rewrite. A corrective operation is proposed, authorized, executed, and recorded exactly like any other action — with its own identity — so the event log records `A.completed` then `B.completed`, never a rewritten A. No CompensationPlanner, UndoManager, or special execution mechanism is introduced until a concrete capability demands one.
 - **AD-044** — Learning is proposal before mutation: experience may produce a versioned, evidence-grounded candidate adaptation, but no observation, model output, score, or confidence value may directly modify authoritative state.
+- **AD-045** — Learning authority is distinct from learning analysis: a proposal may recommend change, but only Nexus authority may permit adaptation; stale, unverified, or improperly scoped proposals cannot authorize themselves, and an ALLOW verdict never mutates authoritative state.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1409,6 +1442,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Controlled action execution (8.2): ALLOW is the only execution path; the existing Executor executes; completion reconstructs | `tests/golden/test_phase8_execution.py` |
 | Action lifecycle / idempotency (8.3): same action_id executes at most once; failure is authoritative and not auto-retried | `tests/golden/test_phase8_lifecycle.py` |
 | Learning proposals (9.1): observation produces a bounded, evidence-grounded proposal without mutation | `tests/golden/test_phase9_learning_proposal.py` |
+| Learning authority (9.2): evidence authenticity, target freshness, scope enforcement; ALLOW is permission, never mutation | `tests/golden/test_phase9_learning_authority.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |
