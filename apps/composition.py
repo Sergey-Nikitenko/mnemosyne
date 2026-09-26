@@ -34,9 +34,12 @@ from control.policy import PolicyEngine, PolicyRules
 from control.tools import ToolRegistry, ToolSpec
 from execution.action import ActionRunner
 from execution.approvals import ApprovalStore
+from execution.composite import CompositeExecutor
 from execution.durable import DurableEventBus
 from execution.fake import FakeExecutor
+from execution.filesystem import FilesystemToolExecutor
 from execution.queue import TaskQueue
+from integrations.deepseek import DeepseekModel
 from federation.outcome import FederatedOutcomeRecorder
 from federation.peer import Federation
 from knowledge.inmemory import ComposedRetriever
@@ -81,6 +84,23 @@ class MnemosyneConfig:
     policy: PolicyRules = field(default_factory=PolicyRules)
     worker_id: str = "worker-1"
     max_replans: int = 2
+    # real reasoning backend (WORK-001): "fake" | "deepseek". The API key is read
+    # from a FILE at construction — the key itself never enters this config or any
+    # Nexus contract/event. `project_dir` bounds the filesystem tool executor.
+    model_backend: str = "fake"
+    model_api_key_file: str = ""
+    model_name: str = "deepseek-chat"
+    project_dir: str = ""
+
+
+def _tool_schemas(tools) -> list[dict]:
+    """OpenAI-style function schemas for a model backend, derived from ToolSpec
+    data (name/description/parameters) — plain dicts, never control objects."""
+    return [{"type": "function",
+             "function": {"name": t.name, "description": t.description,
+                          "parameters": t.parameters or {"type": "object",
+                                                         "properties": {}}}}
+            for t in tools]
 
 
 class MnemosyneSystem:
@@ -167,9 +187,21 @@ class CompositionRoot:
                                    risk=t.risk, parameters=t.parameters)
                         for t in config.tools]
 
-        # execution (the deterministic reference Executor — a real provider is a
-        # later executor behind the same protocol; no provider logic enters here)
-        executor = FakeExecutor(model_script=list(config.model_script))
+        # execution — the model backend + the bounded tool executor, composed
+        # behind ONE Executor protocol. The real backend is more capable than the
+        # fake; it is NOT more authoritative (policy/authority still gates, the
+        # tool executor still enforces the project boundary).
+        if config.model_backend == "deepseek":
+            model_exec = DeepseekModel(
+                api_key_file=config.model_api_key_file,
+                model=config.model_name,
+                tools=_tool_schemas(config.tools))
+            tool_exec = (FilesystemToolExecutor(config.project_dir)
+                         if config.project_dir else FakeExecutor())
+            executor = CompositeExecutor(model_exec, tool_exec,
+                                         model_identity=config.model)
+        else:
+            executor = FakeExecutor(model_script=list(config.model_script))
         runtime = NexusRuntime(retriever=retriever, executor=executor, queue=queue,
                                event_bus=bus, tools=tools, approvals=approvals,
                                policy=policy, worker_id=config.worker_id,

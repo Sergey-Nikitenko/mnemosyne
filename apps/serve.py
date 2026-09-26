@@ -45,6 +45,14 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="agent identity, e.g. agent/mnemosyne (which role)")
     parser.add_argument("--model-id", default="unset", metavar="ID",
                         help="model identity, e.g. model/fake (which reasoning backend)")
+    parser.add_argument("--model-backend", default="fake", choices=["fake", "deepseek"],
+                        help="reasoning backend: fake (deterministic echo) or deepseek (real cloud model)")
+    parser.add_argument("--model-api-key-file", default="", metavar="PATH",
+                        help="path to the DeepSeek API key file (secret, never logged)")
+    parser.add_argument("--model-name", default="deepseek-chat", metavar="NAME",
+                        help="provider model name for the deepseek backend")
+    parser.add_argument("--project-dir", default="", metavar="DIR",
+                        help="bounded filesystem root for the file tools (empty = fake tools)")
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind host (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000,
@@ -63,6 +71,10 @@ def build_config(args) -> MnemosyneConfig:
         user=UserIdentity(user_id=args.user_id),
         agent=AgentIdentity(agent_id=args.agent_id, role="operator"),
         model=ModelIdentity(model_id=args.model_id, family="", version="1"),
+        model_backend=args.model_backend,
+        model_api_key_file=args.model_api_key_file,
+        model_name=args.model_name,
+        project_dir=args.project_dir,
     )
 
 
