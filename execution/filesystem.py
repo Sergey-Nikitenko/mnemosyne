@@ -5,6 +5,13 @@ REJECTED as a ToolResult failure (never a write outside the sandbox). This is th
 "bounded file-write capability": the model proposes a path, the tool enforces the
 boundary, and the operator's project directory is the only thing it can touch.
 
+`run_command` executes ONE executable with argv (`shlex.split` + `subprocess.run` with
+`shell=False`): it is NOT a shell. Pipelines, redirection, `&&`/`||`/`;`, command
+substitution, and shell built-ins are not interpreted — they are passed as literal
+arguments. The model-facing tool description MUST advertise exactly this (pinned by
+tests/conformance/test_run_command_contract.py); advertising "run a shell command"
+silently broke WORK-001's diagnosis -> mutation transition.
+
 stdlib-only (pathlib/subprocess), so `execution/` keeps importing core only.
 """
 from __future__ import annotations
