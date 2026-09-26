@@ -100,6 +100,15 @@ class DeepseekModel:
             return ModelResponse(model=self._model, content="", success=False,
                                  error="invalid provider response")
 
+        return self._parse_response(data)
+
+    def _parse_response(self, data: dict) -> ModelResponse:
+        """Parse a parsed provider payload into a ModelResponse.
+
+        Factored out so a provider whose tool calls carry extra provider-side
+        correlation state (e.g. Gemini's `thought_signature`) can intercept the
+        response without reimplementing the HTTP + error handling above.
+        """
         if "error" in data:
             return ModelResponse(model=self._model, content="", success=False,
                                  error=str(data["error"])[:200])

@@ -41,6 +41,7 @@ from execution.fake import FakeExecutor
 from execution.filesystem import FilesystemToolExecutor
 from execution.queue import TaskQueue
 from integrations.deepseek import DeepseekModel
+from integrations.gemini import GeminiModel
 from federation.outcome import FederatedOutcomeRecorder
 from federation.peer import Federation
 from knowledge.inmemory import ComposedRetriever
@@ -196,8 +197,9 @@ class CompositionRoot:
         # behind ONE Executor protocol. The real backend is more capable than the
         # fake; it is NOT more authoritative (policy/authority still gates, the
         # tool executor still enforces the project boundary).
-        if config.model_backend == "deepseek":
-            model_exec = DeepseekModel(
+        if config.model_backend in ("deepseek", "gemini"):
+            model_cls = DeepseekModel if config.model_backend == "deepseek" else GeminiModel
+            model_exec = model_cls(
                 api_key_file=config.model_api_key_file,
                 model=config.model_name,
                 tools=_tool_schemas(config.tools))
