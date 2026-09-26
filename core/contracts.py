@@ -205,6 +205,10 @@ class ToolCall:
     arguments: dict[str, Any] = field(default_factory=dict)
     idempotency_key: str | None = None
     call_id: str = field(default_factory=lambda: new_id("call"))
+    # Model-neutral correlation identity: links a tool result back to the model
+    # tool invocation that caused it, across a translation boundary. A provider's
+    # own tool-call id is preserved HERE (as data), never as a provider field name.
+    correlation_id: str = ""
 
 
 @dataclass

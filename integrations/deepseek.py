@@ -36,10 +36,41 @@ class DeepseekModel:
         self._tools = list(tools)
         self._timeout = timeout_s
 
+    def _translate_messages(self, messages) -> list[dict]:
+        """Translate model-neutral conversation messages into provider wire format.
+
+        The orchestrator speaks `correlation_id` / `name` / `arguments`; DeepSeek
+        (OpenAI-compatible) speaks `id` / `function` / `tool_call_id`. This method
+        is the ONLY place that provider vocabulary appears — the correlation
+        identity is preserved, the field name is translated."""
+        out = []
+        for m in messages:
+            role = m.get("role")
+            if role == "assistant" and "tool_calls" in m:
+                out.append({
+                    "role": "assistant",
+                    "content": m.get("content"),
+                    "tool_calls": [{
+                        "id": tc.get("correlation_id", ""),
+                        "type": "function",
+                        "function": {"name": tc.get("name", ""),
+                                     "arguments": json.dumps(tc.get("arguments", {}))},
+                    } for tc in m["tool_calls"]],
+                })
+            elif role == "tool":
+                cid = m.get("correlation_id", "")
+                if not cid:
+                    raise ValueError("tool result message missing correlation_id")
+                out.append({"role": "tool", "tool_call_id": cid,
+                            "content": m.get("content", "")})
+            else:
+                out.append(m)  # system / user pass through (role/content)
+        return out
+
     def run_model(self, request: ModelRequest) -> ModelResponse:
         payload = {
             "model": self._model,
-            "messages": request.messages,
+            "messages": self._translate_messages(request.messages),
             "max_tokens": request.max_tokens,
             "stream": False,
         }
@@ -82,7 +113,8 @@ class DeepseekModel:
                 arguments = json.loads(fn.get("arguments") or "{}")
             except (json.JSONDecodeError, TypeError):
                 arguments = {}
-            tool_calls.append(ToolCall(tool_name=fn.get("name", ""), arguments=arguments))
+            tool_calls.append(ToolCall(tool_name=fn.get("name", ""), arguments=arguments,
+                                       correlation_id=tc.get("id", "")))
 
         usage = data.get("usage") or {}
         return ModelResponse(

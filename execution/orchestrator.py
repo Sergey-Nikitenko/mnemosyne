@@ -21,6 +21,8 @@ The evaluator observes and judges; the orchestrator interprets the verdict.
 """
 from __future__ import annotations
 
+import json
+
 from dataclasses import asdict, dataclass, field
 
 from core.contracts import (
@@ -44,6 +46,38 @@ class Outcome:
     events: list[Event] = field(default_factory=list)
     waiting: bool = False
     manifest: RunManifest | None = None
+
+
+def _result_content(result) -> str:
+    """The model-neutral text of a tool result (bounded plain data, never a
+    provider object or a credential)."""
+    if result.output is None:
+        return result.error or ""
+    if isinstance(result.output, str):
+        return result.output
+    return json.dumps(result.output)
+
+
+def _tool_follow_up(tool_results) -> list[dict]:
+    """Build the model-neutral conversation turn that follows tool execution:
+    the assistant's tool invocations first, then each correlated tool result.
+    `correlation_id` links a result back to the invocation that caused it; the
+    provider/adapter owns translating that into its own wire field (tool_call_id).
+    """
+    assistant_calls = [
+        {"correlation_id": r.tool_call.correlation_id,
+         "name": r.tool_call.tool_name,
+         "arguments": dict(r.tool_call.arguments)}
+        for r in tool_results
+    ]
+    tool_msgs = [
+        {"role": "tool",
+         "correlation_id": r.tool_call.correlation_id,
+         "name": r.tool_call.tool_name,
+         "content": _result_content(r)}
+        for r in tool_results
+    ]
+    return [{"role": "assistant", "tool_calls": assistant_calls}] + tool_msgs
 
 
 class Orchestrator:
@@ -252,9 +286,7 @@ class Orchestrator:
                                    events=list(self.bus.history), waiting=True,
                                    manifest=manifest)
                 response = step("model", lambda: do_model(
-                    retrieved,
-                    [{"role": "tool", "content": f"{len(tool_results)} tool result(s)"}],
-                    final=True))
+                    retrieved, _tool_follow_up(tool_results), final=True))
 
             evaluation = step("verify", lambda: verify(tool_results, attempt))
 
