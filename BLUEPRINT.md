@@ -1155,6 +1155,34 @@ proves the central claim: Nexus owns identity, memory, knowledge, continuity, an
 state; models are pluggable reasoning backends, and continuity survives a model
 change without the previous model's private context.
 
+### Phase 7.6 — MemoryStore concurrency (AD-027 conformance, no new AD)
+
+The Operator Console surfaced a real defect (OBS-SQLITE-001): a single shared
+`sqlite3` connection raised `InterfaceError` when a console read (NCS projection →
+`list_as_of`) ran concurrently with a legitimate authoritative write (Phase 9
+adaptation → `record_if_current`). The fix is not new architecture — it is
+conformance to the concurrency contract the execution stores already honor:
+
+- **One SQLite connection per thread.** `MemoryStore` now owns thread-local
+  connections with the same deliberate policy (`busy_timeout`, WAL,
+  `synchronous=NORMAL`, `foreign_keys=ON`), implemented *locally* in `memory/`
+  (stdlib sqlite3) because the layer gate forbids `memory/` importing
+  `execution/sqlite.py`. `close()` closes every connection it ever opened, is
+  idempotent, and writes nothing — shutdown stays observably neutral.
+- **The existing invariants are preserved, not weakened:** `record_if_current` /
+  `retire_if_current` were already single conditional INSERT statements, so the
+  database — not Python timing — still arbitrates the race across connections;
+  atomicity, freshness, temporal `as_of` projection, and retirement all hold under
+  concurrent readers and writers.
+
+**Phase 7.6 acceptance:** *`tests/golden/test_phase7_memory_concurrency.py`
+reproduces the exact reader-vs-writer workload that failed — a reader projecting
+NCS while Phase-9 adaptation writes — and proves no `InterfaceError` /
+`ProgrammingError`, no duplicate versions, no lost writes, deterministic
+historical `as_of`, intact retirement freshness, atomic concurrent CAS, and
+observably-neutral `close()`. No new AD was required: AD-027 was applied
+correctly to a store that predated it.*
+
 ### Phase 8 — capability / agency plane
 
 Phase 7 proved Mnemosyne can *remember*; Phase 8 asks what it can *do* with that
@@ -1651,6 +1679,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | ContinuityProjector / NCS (7.3): deterministic as-of reconstruction, read-only, model-independent | `tests/golden/test_phase7_continuity.py` |
 | ContextAdapter boundary (7.4): deterministic, pure, faithful translation; provider vocabulary stays off the NCS | `tests/golden/test_phase7_context_adapter.py` |
 | Model handoff / continuity independence (7.5): reconstructive, not transmissive — Model A's private context never crosses | `tests/golden/test_phase7_handoff.py` |
+| MemoryStore concurrency (7.6): AD-027 one-connection-per-thread; concurrent NCS reads + adaptation writes with no error, atomic CAS, deterministic as_of, neutral close | `tests/golden/test_phase7_memory_concurrency.py` |
 | Capability/authority boundary (8.1): model proposes; a model-independent, continuity-aware authority decides | `tests/golden/test_phase8_capability.py` |
 | Controlled action execution (8.2): ALLOW is the only execution path; the existing Executor executes; completion reconstructs | `tests/golden/test_phase8_execution.py` |
 | Action lifecycle / idempotency (8.3): same action_id executes at most once; failure is authoritative and not auto-retried | `tests/golden/test_phase8_lifecycle.py` |

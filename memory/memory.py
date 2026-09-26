@@ -13,11 +13,23 @@ framework: the event log is the source of truth; the object is derived.
 
 The store is stdlib-only (raw sqlite3, like knowledge/persistent.py) so `memory/`
 keeps importing core only.
+
+**Concurrency (AD-027).** The store is safe under concurrent readers and writers:
+each thread gets its OWN sqlite3 connection (thread-local), so no connection is
+ever shared across threads. This is the SAME policy as the execution stores
+(`execution/sqlite.SqliteStore`), implemented locally because `memory/` must not
+reach into `execution/` (layer gate). The exclusive transitions
+(`record_if_current` / `retire_if_current`) were already single conditional INSERT
+statements, so the database — not Python timing — still arbitrates the race
+across connections. `check_same_thread=False` exists only so `close()` can close
+connections a (now-exited) worker thread opened; it does NOT reintroduce shared
+connections (sharing is prevented by construction, one per thread).
 """
 from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from datetime import datetime
 
 from core.contracts import Preference, Procedure, SemanticMemory, new_id, utcnow
@@ -28,17 +40,47 @@ class MemoryStore:
     """A durable event log of memory changes + a deterministic projection of it."""
 
     def __init__(self, path: str) -> None:
-        # `check_same_thread=False` lets the Operator Console project the NCS from
-        # a serving thread other than the one that opened the store. SQLite itself
-        # serializes access (the bundled build is compiled serialized), and the
-        # console only ever READS (`list_as_of`/`get`/`history`); the write paths
-        # (`record`/`record_if_current`/`retire_if_current`) remain single-writer.
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.execute(
+        self.path = path
+        self._local = threading.local()
+        self._connections: list[sqlite3.Connection] = []
+        self._lock = threading.Lock()
+        self._closed = False
+        self._conn()  # create the first connection and apply the schema
+
+    @staticmethod
+    def _connect(path: str) -> sqlite3.Connection:
+        """Open ONE connection with the deliberate SQLite policy (AD-027)."""
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def _schema(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS memory_events ("
             "event_id TEXT PRIMARY KEY, kind TEXT, memory_id TEXT, "
             "version INTEGER, payload TEXT, emitted_at TEXT)")
-        self._conn.commit()
+
+    def _conn(self) -> sqlite3.Connection:
+        """The CURRENT thread's connection, created on first use (AD-027)."""
+        if self._closed:
+            raise RuntimeError("MemoryStore is closed")
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._connect(self.path)
+            self._schema(conn)
+            conn.commit()
+            self._local.conn = conn
+            with self._lock:
+                self._connections.append(conn)
+        return conn
+
+    def connection_count(self) -> int:
+        """Number of open connections (one per thread that has used this store)."""
+        with self._lock:
+            return len(self._connections)
 
     def record(self, kind: str, memory_id: str, content: dict,
                scope: str = "", provenance: dict | None = None, now=None):
@@ -61,11 +103,12 @@ class MemoryStore:
             "created_at": created, "updated_at": emitted,
             **content,
         }
-        self._conn.execute(
+        conn = self._conn()
+        conn.execute(
             "INSERT INTO memory_events (event_id, kind, memory_id, version, payload, emitted_at) "
             "VALUES (?,?,?,?,?,?)",
             (event_id, kind, memory_id, version, json.dumps(payload), emitted))
-        self._conn.commit()
+        conn.commit()
         return self.get(kind, memory_id)
 
     def record_if_current(self, kind: str, memory_id: str, content: dict,
@@ -90,14 +133,15 @@ class MemoryStore:
             "created_at": current.created_at.isoformat(), "updated_at": emitted,
             **content,
         }
-        cur = self._conn.execute(
+        conn = self._conn()
+        cur = conn.execute(
             "INSERT INTO memory_events (event_id, kind, memory_id, version, payload, emitted_at) "
             "SELECT ?, ?, ?, ?, ?, ? "
             "WHERE ? = (SELECT COALESCE(MAX(version), 0) FROM memory_events "
             "           WHERE kind = ? AND memory_id = ?)",
             (event_id, kind, memory_id, version, json.dumps(payload), emitted,
              expected_version, kind, memory_id))
-        self._conn.commit()
+        conn.commit()
         if cur.rowcount == 0:
             return None
         return self.get(kind, memory_id)
@@ -123,21 +167,22 @@ class MemoryStore:
         }
         # version=0 is the retirement sentinel (content events are version >= 1),
         # so MAX(version) over content events is the current content version.
-        cur = self._conn.execute(
+        conn = self._conn()
+        cur = conn.execute(
             "INSERT INTO memory_events (event_id, kind, memory_id, version, payload, emitted_at) "
             "SELECT ?, ?, ?, 0, ?, ? "
             "WHERE ? = (SELECT COALESCE(MAX(version), 0) FROM memory_events "
             "           WHERE kind = ? AND memory_id = ? AND version >= 1)",
             (event_id, kind, memory_id, json.dumps(payload), emitted,
              expected_version, kind, memory_id))
-        self._conn.commit()
+        conn.commit()
         if cur.rowcount == 0:
             return None
         return self.get(kind, memory_id)
 
     def retirement_history(self, kind: str, memory_id: str) -> list[dict]:
         """The retirement events for a logical memory, oldest first."""
-        rows = self._conn.execute(
+        rows = self._conn().execute(
             "SELECT payload FROM memory_events "
             "WHERE kind=? AND memory_id=? AND version=0 ORDER BY rowid",
             (kind, memory_id)).fetchall()
@@ -146,7 +191,7 @@ class MemoryStore:
     def get(self, kind: str, memory_id: str):
         """Project the event log into the CURRENT version (or None), with its
         lifecycle status (active / retired)."""
-        rows = self._conn.execute(
+        rows = self._conn().execute(
             "SELECT payload FROM memory_events "
             "WHERE kind=? AND memory_id=? AND version >= 1 ORDER BY version",
             (kind, memory_id)).fetchall()
@@ -158,7 +203,7 @@ class MemoryStore:
     def history(self, kind: str, memory_id: str) -> list:
         """All CONTENT versions, oldest first (retirement is a lifecycle event,
         never a content version). Proves v1 is never silently mutated."""
-        rows = self._conn.execute(
+        rows = self._conn().execute(
             "SELECT payload FROM memory_events "
             "WHERE kind=? AND memory_id=? AND version >= 1 ORDER BY version",
             (kind, memory_id)).fetchall()
@@ -168,7 +213,7 @@ class MemoryStore:
         """Every record of a kind, projected to its version in force at `as_of`,
         with lifecycle status: ACTIVE unless retired on or before `as_of`.
         Deterministic: sorted by memory_id."""
-        rows = self._conn.execute(
+        rows = self._conn().execute(
             "SELECT memory_id, payload FROM memory_events "
             "WHERE kind=? AND version >= 1 AND emitted_at <= ? ORDER BY memory_id, version",
             (kind, as_of.isoformat())).fetchall()
@@ -181,13 +226,13 @@ class MemoryStore:
                 for mid in sorted(latest)]
 
     def _is_retired(self, kind: str, memory_id: str) -> bool:
-        row = self._conn.execute(
+        row = self._conn().execute(
             "SELECT 1 FROM memory_events WHERE kind=? AND memory_id=? AND version=0",
             (kind, memory_id)).fetchone()
         return row is not None
 
     def _retired_ids(self, kind: str, as_of) -> set:
-        rows = self._conn.execute(
+        rows = self._conn().execute(
             "SELECT memory_id FROM memory_events "
             "WHERE kind=? AND version=0 AND emitted_at <= ?",
             (kind, as_of.isoformat())).fetchall()
@@ -218,4 +263,14 @@ class MemoryStore:
         raise ValueError(f"unknown memory kind: {kind}")
 
     def close(self) -> None:
-        self._conn.close()
+        """Close every connection the store ever opened, whichever thread opened
+        it. Idempotent. Writes nothing — closing never modifies authoritative
+        state or fabricates a terminal event."""
+        if self._closed:
+            return
+        self._closed = True
+        with self._lock:
+            conns, self._connections = self._connections, []
+        for conn in conns:
+            conn.close()
+        self._local.conn = None
