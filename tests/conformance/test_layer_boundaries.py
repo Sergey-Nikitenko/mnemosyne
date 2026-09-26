@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 STDLIB = set(sys.stdlib_module_names)
-LAYERS = ("core", "control", "execution", "knowledge", "memory", "integrations", "observability", "learning", "apps")
+LAYERS = ("core", "control", "execution", "knowledge", "memory", "integrations", "observability", "learning", "federation", "apps")
 
 # What each layer may import beyond itself + the stdlib.
 ALLOWED = {
@@ -28,6 +28,7 @@ ALLOWED = {
     "integrations": {"core"},
     "observability": {"core"},
     "learning": {"core"},
+    "federation": {"core"},
     "apps": set(LAYERS),
 }
 

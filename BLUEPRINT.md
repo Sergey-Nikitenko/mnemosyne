@@ -1300,6 +1300,40 @@ version, with provenance to its prior version and evidence; stale authorization
 never mutates state, and history is never rewritten.* A successful adaptation does
 not recursively count as evidence for another (no self-feeding loop).
 
+### Phase 10 — federation
+
+Until now there has been one authority domain. Federation introduces other systems
+with their own identity, state, policy, history, and authority. The governing
+invariant: **federation composes authority; it does not merge authority** — neither
+Nexus gets direct access to the other's authoritative state.
+
+### Phase 10.1 — federation identity / claims
+
+Can Nexus represent another independent Nexus and the capabilities it claims to
+expose without treating those claims as local authority (AD-047)?
+
+    remote declaration -> Federation -> FederationPeer -> X (not trusted)
+
+- **One contract: `FederationPeer`.** A local, bounded representation of another
+  authority domain — distinct from AgentIdentity (inside a domain) and
+  ModelIdentity (a reasoning backend). `peer_id` is THIS Nexus's stable, namespaced
+  identity for the remote domain, never the remote's arbitrary self-description.
+- **Claims, not authority.** Advertised capabilities (strings) and metadata
+  (including "trusted"/"authority") are carried as remote self-description, never
+  consulted by local authority.
+- **No state exchange.** The representation never exposes local NCS or raw
+  memory/event history — only explicitly selected fields cross.
+- **Transport independence.** `federation/peer.py` is core-only: no HTTP/MCP/SDK
+  dependency (layer- and provider-gated).
+- **Explicit compatibility.** `Federation` checks protocol version
+  deterministically; an incompatible version fails (no negotiation yet).
+- **No crypto.** 10.1 establishes the trust boundary contractually; authentication
+  is a later mechanism.
+
+Proven by `tests/golden/test_phase10_federation_peer.py` (independent identity,
+stable representation, claims-not-authority, state isolation, bounded disclosure,
+explicit compatibility, malicious self-authorization rejected).
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1369,6 +1403,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-044** — Learning is proposal before mutation: experience may produce a versioned, evidence-grounded candidate adaptation, but no observation, model output, score, or confidence value may directly modify authoritative state.
 - **AD-045** — Learning authority is distinct from learning analysis: a proposal may recommend change, but only Nexus authority may permit adaptation; stale, unverified, or improperly scoped proposals cannot authorize themselves, and an ALLOW verdict never mutates authoritative state.
 - **AD-046** — Adaptation is an authorized, compare-and-append transition: only a currently permitted proposal may create exactly one new authoritative memory version, with provenance to its prior version and evidence; stale authorization never mutates state, and history is never rewritten.
+- **AD-047** — Federation begins with independent authority domains: a remote Nexus may declare identity, compatibility, and capability claims, but those declarations never become local authority or shared state; only explicitly bounded information crosses the federation boundary.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1483,6 +1518,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Learning proposals (9.1): observation produces a bounded, evidence-grounded proposal without mutation | `tests/golden/test_phase9_learning_proposal.py` |
 | Learning authority (9.2): evidence authenticity, target freshness, scope enforcement; ALLOW is permission, never mutation | `tests/golden/test_phase9_learning_authority.py` |
 | Authorized adaptation (9.3): revalidated, compare-and-append, exactly-once, append-only, provenance-preserving | `tests/golden/test_phase9_adaptation.py` |
+| Federation identity / claims (10.1): representation before trust; remote claims never become local authority or shared state | `tests/golden/test_phase10_federation_peer.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

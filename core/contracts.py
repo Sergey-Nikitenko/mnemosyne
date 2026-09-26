@@ -509,6 +509,25 @@ class AdaptationResult:
     provenance: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class FederationPeer:
+    """A local, bounded representation of another independent Nexus authority
+    domain (AD-047).
+
+    Distinct from AgentIdentity (an agent lives INSIDE a domain) and ModelIdentity
+    (a reasoning backend): a peer IS another authoritative system. `peer_id` is
+    THIS Nexus's stable, namespaced identity for the remote domain — derived
+    locally, never the remote's arbitrary self-description. `capabilities` are
+    CLAIMS (strings), never local authority; `metadata` is remote self-description,
+    never consulted by local authority; `endpoint` is an opaque, transport-
+    independent reference."""
+    peer_id: str
+    protocol_version: int
+    capabilities: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    endpoint: str = ""
+
+
 @dataclass
 class ModelRequest:
     """A model request with its own identity, so `model.requested` and

@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (63 golden + conformance tests)
+# Run the entire suite (64 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -81,6 +81,7 @@ python tests/golden/test_phase8_lifecycle.py        # lifecycle/idempotency: sam
 python tests/golden/test_phase9_learning_proposal.py # learning proposals: observe, never mutate
 python tests/golden/test_phase9_learning_authority.py # learning authority: ALLOW is permission, not mutation
 python tests/golden/test_phase9_adaptation.py         # authorized adaptation: compare-and-append, exactly-once
+python tests/golden/test_phase10_federation_peer.py    # federation identity: representation before trust
 ```
 
 ---
@@ -116,6 +117,12 @@ its history is never rewritten.*
 one new authoritative memory version via an atomic, in-store compare-and-append
 (9.3). The invariant: *adaptation is an authorized, compare-and-append transition
 — stale authorization never mutates state, and history is never rewritten.*
+
+**Phase 10.1 shipped.** Federation begins with representation before trust: a
+remote Nexus may declare identity, protocol version, and capability claims, and a
+`Federation` component represents it as a bounded, namespaced `FederationPeer`.
+Those claims never become local authority or shared state; protocol compatibility
+is checked explicitly; no crypto, no transport dependency.
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and
