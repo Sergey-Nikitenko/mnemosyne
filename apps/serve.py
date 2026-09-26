@@ -53,6 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="provider model name for the deepseek backend")
     parser.add_argument("--project-dir", default="", metavar="DIR",
                         help="bounded filesystem root for the file tools (empty = fake tools)")
+    parser.add_argument("--max-tool-rounds", type=int, default=8, metavar="N",
+                        help="max model->tools cycles per attempt before a terminal answer (default 8)")
     parser.add_argument("--host", default="127.0.0.1",
                         help="bind host (default 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000,
@@ -75,6 +77,7 @@ def build_config(args) -> MnemosyneConfig:
         model_api_key_file=args.model_api_key_file,
         model_name=args.model_name,
         project_dir=args.project_dir,
+        max_tool_rounds=args.max_tool_rounds,
     )
 
 

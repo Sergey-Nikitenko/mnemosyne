@@ -84,7 +84,8 @@ class Orchestrator:
     """Composes injected capabilities behind one deterministic, bounded loop."""
 
     def __init__(self, *, retriever, executor, policy, tools, evaluator,
-                 bus=None, approvals=None, run_records=None, max_replans: int = 2) -> None:
+                 bus=None, approvals=None, run_records=None, max_replans: int = 2,
+                 max_tool_rounds: int = 8) -> None:
         self.retriever = retriever      # .search(query, filters, k) -> RetrievalResult
         self.executor = executor        # raw capability (FakeExecutor, subprocess, ...)
         self.policy = policy            # PolicyEngine (tool gating)
@@ -94,6 +95,10 @@ class Orchestrator:
         self.approvals = approvals      # ApprovalStore (optional; None = approvals not wired)
         self.run_records = run_records  # RunRecordStore (optional; None = not persisted)
         self.max_replans = max_replans
+        # The orchestration budget: how many tool ROUNDS (model -> tools cycles)
+        # may run before a terminal model turn. The model may request another
+        # round; it never decides that iteration is unbounded.
+        self.max_tool_rounds = max_tool_rounds
 
     def _model_identity(self) -> ModelIdentity:
         """Which logical model configuration this executor runs — a ModelIdentity
@@ -272,21 +277,37 @@ class Orchestrator:
 
         answer = ""
         attempt = 0
-        while True:
+        while True:  # the replan loop (unchanged)
             attempt += 1
             retrieved = step("retrieve", do_retrieve)
-            response = step("model", lambda: do_model(retrieved))
-            tool_results = []
-            if response.tool_calls:
-                tool_results, waiting = step("tool", lambda: run_tools(response.tool_calls))
+            conversation: list[dict] = []  # assistant invocations + correlated results
+            tool_results: list = []        # every result across rounds, for verification
+            rounds = 0
+            response = step("model", lambda: do_model(retrieved, conversation))
+
+            # iteration, not autonomy: repeat the model -> tools cycle while the
+            # model keeps proposing tool calls, bounded by max_tool_rounds. A final
+            # model response (no tool calls) is NOT a tool round.
+            while response.tool_calls:
+                if rounds >= self.max_tool_rounds:
+                    reason = (f"tool-round budget exhausted after "
+                              f"{self.max_tool_rounds} round(s)")
+                    state.task_status = TaskStatus.FAILED
+                    emit(EventType.RUN_FAILED, "failed", {"reason": reason})
+                    trace.nodes.append({"type": "answer", "answer": "", "reason": reason})
+                    return Outcome(answer="", run=run, trace=trace, live_state=state,
+                                   events=list(self.bus.history), manifest=manifest)
+                rounds += 1
+                results, waiting = step("tool", lambda: run_tools(response.tool_calls))
                 if waiting:
                     # the task pauses durably for human approval
                     trace.nodes.append({"type": "waiting"})
                     return Outcome(answer="", run=run, trace=trace, live_state=state,
                                    events=list(self.bus.history), waiting=True,
                                    manifest=manifest)
-                response = step("model", lambda: do_model(
-                    retrieved, _tool_follow_up(tool_results), final=True))
+                tool_results.extend(results)
+                conversation.extend(_tool_follow_up(results))
+                response = step("model", lambda: do_model(retrieved, conversation))
 
             evaluation = step("verify", lambda: verify(tool_results, attempt))
 
