@@ -1153,6 +1153,38 @@ The slice stops here: no retries, no learning, no capability discovery, no
 planning, no autonomy, no new persistence. Execution does not silently become
 learning — that belongs to Phase 9.
 
+### Phase 8.3 — action lifecycle / idempotency
+
+Can Nexus execute an authorized action exactly once from Nexus's perspective,
+preserve its lifecycle, and distinguish retry/recovery from a genuinely new
+action (AD-042)?
+
+    proposed -> authorized -> executing -> completed | failed
+
+- **The action owns its identity.** `ActionRequest.action_id` is the identity of
+  the LOGICAL action — the idempotency key, distinct from run/task/provider ids.
+  The same id is the same logical action; a new id is a new action.
+- **Idempotency is the hard invariant.** `ActionRunner` checks the authoritative
+  event log (durable when a `DurableEventBus` is injected) for an existing
+  `action.completed` / `action.failed` for that id, and returns the reconstructed
+  result WITHOUT re-executing. A retry never becomes a second execution.
+- **Failure is authoritative, not a retry trigger.** A failed execution emits
+  `action.failed` (distinct from `action.completed`); retrying a failed id returns
+  the existing failure — Nexus never auto-retries. A genuine re-attempt is a NEW
+  action_id.
+- **Compensation is a boundary, not an implementation.** A corrective operation is
+  a new action through the full pipeline (ActionRequest → Authority → Executor →
+  ActionResult). History is never rewritten: A.completed, then B.completed.
+- **Reconstruction.** `reconstruct_action(action_id, events)` projects the
+  terminal outcome (completed OR failed) deterministically — latest terminal wins.
+
+Proven by `tests/golden/test_phase8_lifecycle.py` (exactly-once, idempotent retry,
+deterministic reconstruction, distinct new action, authoritative failure with no
+auto-retry).
+
+Still frozen out: automatic retries, autonomous recovery, compensation planning,
+new persistence, learning from outcomes. Execution is data; learning is Phase 9.
+
 ## Golden tasks
 
 20–50 deterministic tasks that must pass after every architectural change:
@@ -1217,6 +1249,7 @@ Decisions whose wrong interpretation could cause regressions. Not a changelog.
 - **AD-039** — A model change must not require transfer of the previous model's private context for Nexus continuity to survive: the handoff is reconstructive, not transmissive. Model B reconstructs continuity from authoritative state (re-project the event-sourced memory as-of with the new `ModelIdentity`, then adapt), never from Model A's messages, hidden state, prompt, transcript, or response. User/agent identity stay byte-identical; only `ModelIdentity` changes; and persisted memory reaches Model B through the same 7.3→7.4 pipeline.
 - **AD-040** — The authority that validates a proposed action is a pure, model-independent, continuity-aware function of (proposal, NCS, policy): `Authority.evaluate(action, ncs) -> ActionVerdict`. The model proposes; the authority decides; the executor executes; events record. The verdict never reads the proposing model's identity, reads durable continuity (preferences scoped to the action) to refine the static risk gate, ignores the model's self-assertions, and never executes or emits. Static DENY (destructive/denylist) is final — continuity refines, never overrides the reflex arc.
 - **AD-041** — Action execution is gated by the authority and recorded as an authoritative, reconstructible event: only an ALLOW verdict reaches the Executor (DENY / APPROVAL_REQUIRED never execute); the outcome is an `ActionResult` (distinct from `ActionVerdict`); and a successful execution emits a bounded `action.completed` event carrying enough provenance (who/capability/parameters/run/task/when/result) to reconstruct the completion deterministically. Execution never silently becomes learning.
+- **AD-042** — An action's identity is its `action_id` — the idempotency key, distinct from run/task/provider ids. The same id is the same logical action and executes at most once from Nexus's perspective: a retry returns the reconstructed authoritative terminal outcome (completed or failed) without re-executing, and a failed action is never auto-retried. A new id is a new logical action. Terminal outcomes are authoritative, reconstructible events; failure is a known outcome, never a trigger for learning or history rewrite.
 
 ## Contract conformance: MUST MATCH vs MAY DIFFER
 
@@ -1327,6 +1360,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Model handoff / continuity independence (7.5): reconstructive, not transmissive — Model A's private context never crosses | `tests/golden/test_phase7_handoff.py` |
 | Capability/authority boundary (8.1): model proposes; a model-independent, continuity-aware authority decides | `tests/golden/test_phase8_capability.py` |
 | Controlled action execution (8.2): ALLOW is the only execution path; the existing Executor executes; completion reconstructs | `tests/golden/test_phase8_execution.py` |
+| Action lifecycle / idempotency (8.3): same action_id executes at most once; failure is authoritative and not auto-retried | `tests/golden/test_phase8_lifecycle.py` |
 | Router never bypasses policy | `tests/golden/test_phase1_composition.py` |
 | State is recoverable (a projection of events) | `tests/golden/test_phase0_foundation.py` |
 | The boring event envelope (one uniform shape) | enforced by the `Event` dataclass itself |

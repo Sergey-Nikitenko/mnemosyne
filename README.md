@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (59 golden + conformance tests)
+# Run the entire suite (60 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -77,6 +77,7 @@ python tests/golden/test_phase7_context_adapter.py  # the NCS -> request transla
 python tests/golden/test_phase7_handoff.py          # model handoff: continuity survives a model swap
 python tests/golden/test_phase8_capability.py       # authority: the model proposes, Nexus decides
 python tests/golden/test_phase8_execution.py        # controlled execution: ALLOW runs, DENY/APPROVAL never execute
+python tests/golden/test_phase8_lifecycle.py        # lifecycle/idempotency: same action runs at most once
 ```
 
 ---
@@ -96,11 +97,13 @@ documented in [`BLUEPRINT.md`](BLUEPRINT.md)).
 Phase 7 is the proof milestone for Mnemosyne's central claim: Nexus owns identity,
 memory, continuity, and state; models are pluggable reasoning backends.
 
-**Phase 8.2 shipped.** The capability/agency plane now runs the full boundary:
-a model proposes an `ActionRequest`; a pure, continuity-aware `ContinuityAuthority`
-returns an `ActionVerdict` (8.1); and an `ActionRunner` executes an ALLOWed action
-through the existing `Executor`, recording a reconstructible `action.completed`
-event (8.2). DENY and APPROVAL_REQUIRED never reach the executor.
+**Phase 8.3 shipped.** The capability/agency plane now has a full lifecycle:
+a model proposes an `ActionRequest`; a continuity-aware `ContinuityAuthority`
+returns an `ActionVerdict` (8.1); an `ActionRunner` executes an ALLOWed action
+through the existing `Executor` and records `action.completed` / `action.failed`
+(8.2); and the `action_id` is the idempotency key — the same logical action
+executes at most once, and a failed action is authoritative, never auto-retried
+(8.3).
 
 Mnemosyne is the Titaness of Memory, mother of the Muses — every art and act of
 reasoning flows from her. The reasoning engines are downstream; the memory and

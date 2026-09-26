@@ -369,13 +369,17 @@ class Capability:
 
 @dataclass
 class ActionRequest:
-    """A model's PROPOSAL to invoke a capability (AD-040).
+    """A model's PROPOSAL to invoke a capability (AD-040 / AD-042).
 
-    The model proposes; it never authorizes. `requested_by` is the agent ROLE
-    (which survives model replacement — the model is only the backend). `claims`
-    is carried but ignored by the authority: a model cannot assert its way into
-    permission. `scope` is the project/domain the action targets."""
+    The model proposes; it never authorizes. `action_id` is the identity of the
+    LOGICAL action — the idempotency key (distinct from run/task/provider ids):
+    the same id is the same logical action and executes at most once; a new id is
+    a new action. Empty means "mint a fresh identity". `requested_by` is the agent
+    ROLE (which survives model replacement — the model is only the backend).
+    `claims` is carried but ignored by the authority: a model cannot assert its
+    way into permission. `scope` is the project/domain the action targets."""
     capability: str
+    action_id: str = ""
     parameters: dict[str, Any] = field(default_factory=dict)
     requested_by: AgentIdentity = field(default_factory=AgentIdentity)
     scope: str = ""
