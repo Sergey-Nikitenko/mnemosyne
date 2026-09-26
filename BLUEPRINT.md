@@ -32,6 +32,13 @@ Components never touch another component's internal state. They communicate by
 **interface** (`component → interface → component`) or by **event**
 (`component → event → consumer`).
 
+## A second principle
+
+**New capability comes from composing frozen guarantees, not bypassing them.**
+Phases 7–10 gave the earlier machinery richer semantics; later phases should
+increasingly be compositions of already-proven authority domains (authority →
+authoritative result) rather than new machinery that reaches around them.
+
 ## Control plane vs execution plane (the distinction that matters)
 
 The directory split (`control/` vs `execution/`) is secondary. The rule is:
