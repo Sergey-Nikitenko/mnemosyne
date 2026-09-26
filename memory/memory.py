@@ -28,7 +28,12 @@ class MemoryStore:
     """A durable event log of memory changes + a deterministic projection of it."""
 
     def __init__(self, path: str) -> None:
-        self._conn = sqlite3.connect(path)
+        # `check_same_thread=False` lets the Operator Console project the NCS from
+        # a serving thread other than the one that opened the store. SQLite itself
+        # serializes access (the bundled build is compiled serialized), and the
+        # console only ever READS (`list_as_of`/`get`/`history`); the write paths
+        # (`record`/`record_if_current`/`retire_if_current`) remain single-writer.
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS memory_events ("
             "event_id TEXT PRIMARY KEY, kind TEXT, memory_id TEXT, "

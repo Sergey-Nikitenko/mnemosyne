@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operator Console — Mnemosyne</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+    --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --red: #f85149;
+    --amber: #d29922; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  .rule { background: #1c2128; border-bottom: 1px solid var(--border);
+          padding: 10px 20px; font-size: 13px; color: var(--amber); }
+  .rule strong { color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+           border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .conn { font-family: var(--mono); font-size: 12px; padding: 3px 10px;
+          border-radius: 12px; border: 1px solid var(--border); }
+  .conn.ok { color: var(--green); border-color: var(--green); }
+  .conn.down { color: var(--red); border-color: var(--red); }
+  button { background: #21262d; color: var(--text); border: 1px solid var(--border);
+           border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  button.danger { color: var(--red); }
+  button.approve { color: var(--green); }
+  main { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; padding: 16px 20px; }
+  .panel { background: var(--panel); border: 1px solid var(--border);
+           border-radius: 8px; padding: 14px; min-width: 0; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
+              color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .span-3 { grid-column: span 3; } .span-4 { grid-column: span 4; }
+  .span-5 { grid-column: span 5; } .span-6 { grid-column: span 6; }
+  .span-7 { grid-column: span 7; } .span-8 { grid-column: span 8; }
+  .span-12 { grid-column: span 12; }
+  input, select { background: #0d1117; color: var(--text); border: 1px solid var(--border);
+                  border-radius: 6px; padding: 7px 10px; font-size: 13px; width: 100%; }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row input { flex: 1; }
+  pre { background: #0d1117; border: 1px solid var(--border); border-radius: 6px;
+        padding: 10px; overflow: auto; max-height: 420px; font-family: var(--mono);
+        font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .stream { max-height: 520px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+  .ev { font-family: var(--mono); font-size: 12px; padding: 3px 6px; border-left: 3px solid var(--border); }
+  .ev .t { color: var(--accent); } .ev .ts { color: var(--muted); font-size: 11px; }
+  .badge { display: inline-block; font-family: var(--mono); font-size: 11px;
+           padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); }
+  .badge.ok { color: var(--green); border-color: var(--green); }
+  .badge.fail { color: var(--red); border-color: var(--red); }
+  .badge.unknown { color: var(--amber); border-color: var(--amber); }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 2px 8px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  ul { margin: 0; padding-left: 18px; } li { margin: 2px 0; }
+  .item { border-top: 1px solid var(--border); padding: 6px 0; font-size: 13px; }
+  .item:first-child { border-top: 0; }
+  .muted { color: var(--muted); }
+  .actions { display: flex; gap: 6px; margin-top: 6px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="rule">
+  <strong>The Operator Console is a projection of authoritative Mnemosyne state.</strong>
+  It may request operations and display evidence; it <strong>never</strong> defines
+  truth, authority, identity, or continuity. Interrupted actions render
+  <em>attempted / unknown</em> — never a failure verdict.
+</div>
+
+<header>
+  <h1>Operator Console</h1>
+  <span class="conn down" id="conn">disconnected</span>
+  <button id="reconstruct" title="Re-fetch every projection from authoritative state">Reconstruct</button>
+  <span class="muted" id="last-event">no events yet</span>
+</header>
+
+<main>
+  <!-- submit task / request -->
+  <section class="panel span-4">
+    <h2>Submit task / request</h2>
+    <form id="ask-form" class="row">
+      <input id="ask-title" placeholder="task title / request" required>
+      <button type="submit">Submit</button>
+    </form>
+    <div id="ask-result" class="muted"></div>
+    <div class="row" style="margin-top:8px">
+      <input id="task-id" placeholder="task_id">
+      <button id="task-refresh">Status</button>
+    </div>
+    <div id="task-status" class="muted"></div>
+  </section>
+
+  <!-- identities -->
+  <section class="panel span-4">
+    <h2>Identities</h2>
+    <div id="identities" class="muted">—</div>
+  </section>
+
+  <!-- NCS summary -->
+  <section class="panel span-4">
+    <h2>Continuity / memory (NCS)</h2>
+    <div id="ncs" class="muted">—</div>
+  </section>
+
+  <!-- approvals -->
+  <section class="panel span-6">
+    <h2>Proposed actions · approvals</h2>
+    <div id="approvals" class="muted">—</div>
+  </section>
+
+  <!-- action lifecycle inspector -->
+  <section class="panel span-6">
+    <h2>Action lifecycle inspector</h2>
+    <div class="row">
+      <input id="action-id" placeholder="action_id">
+      <button id="action-inspect">Inspect</button>
+    </div>
+    <div id="action-result" class="muted">—</div>
+  </section>
+
+  <!-- authoritative event stream -->
+  <section class="panel span-8">
+    <h2>Authoritative event stream <span class="muted">(live)</span></h2>
+    <div class="stream" id="stream">—</div>
+  </section>
+
+  <!-- raw trace -->
+  <section class="panel span-4">
+    <h2>Raw trace / log</h2>
+    <div class="row">
+      <input id="run-id" placeholder="run_id">
+      <button id="trace-load">Trace</button>
+    </div>
+    <pre id="trace">—</pre>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
+  (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let ws = null;
+
+function setConn(ok) {
+  $("conn").textContent = ok ? "connected" : "disconnected";
+  $("conn").className = "conn " + (ok ? "ok" : "down");
+}
+
+async function get(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(url + " -> " + r.status);
+  return r.json();
+}
+async function post(url) {
+  const r = await fetch(url, { method: "POST" });
+  if (!r.ok) throw new Error(url + " -> " + r.status);
+  return r.json();
+}
+
+/* ---- read-only projections ---- */
+async function loadIdentities() {
+  const d = await get("/api/identities");
+  $("identities").innerHTML = `
+    <div class="kv">
+      <span class="k">user</span><span>${esc(d.user.key)}</span>
+      <span class="k">agent</span><span>${esc(d.agent.key)} (${esc(d.agent.role)})</span>
+      <span class="k">model</span><span>${esc(d.model.key)}</span>
+    </div>`;
+}
+
+async function loadNcs() {
+  const d = await get("/api/ncs");
+  const s = d.summary;
+  let html = `<div class="kv">
+    <span class="k">as of</span><span>${esc(d.as_of)}</span>
+    <span class="k">procedures</span><span>${s.procedures}</span>
+    <span class="k">semantic</span><span>${s.semantic_memories}</span>
+    <span class="k">preferences</span><span>${s.preferences}</span>
+  </div>`;
+  if (d.procedures.length) {
+    html += '<div class="item"><strong>procedures</strong><ul>' +
+      d.procedures.map(p => `<li>${esc(p.name)} <span class="muted">v${p.version} · ${esc(p.status)}</span></li>`).join("") +
+      "</ul></div>";
+  }
+  if (d.semantic_memories.length) {
+    html += '<div class="item"><strong>semantic</strong><ul>' +
+      d.semantic_memories.map(m => `<li>${esc(m.subject)} ${esc(m.predicate)} ${esc(m.object)}</li>`).join("") +
+      "</ul></div>";
+  }
+  if (d.preferences.length) {
+    html += '<div class="item"><strong>preferences</strong><ul>' +
+      d.preferences.map(p => `<li>${esc(p.key)} = ${esc(p.value)}</li>`).join("") +
+      "</ul></div>";
+  }
+  $("ncs").innerHTML = html || '<span class="muted">no memory</span>';
+}
+
+async function loadApprovals() {
+  const d = await get("/api/approvals");
+  if (!d.approvals.length) { $("approvals").innerHTML = '<span class="muted">none</span>'; return; }
+  $("approvals").innerHTML = d.approvals.map(a => {
+    const badge = a.status === "pending"
+      ? '<span class="badge unknown">pending</span>'
+      : '<span class="badge ok">' + esc(a.status) + "</span>";
+    const controls = a.status === "pending"
+      ? `<div class="actions">
+           <button class="approve" data-a="${esc(a.approval_id)}" data-v="approve">Approve</button>
+           <button class="danger" data-a="${esc(a.approval_id)}" data-v="deny">Deny</button>
+         </div>`
+      : "";
+    return `<div class="item">
+      <strong>${esc(a.tool)}</strong> <span class="muted">risk=${esc(a.risk)}</span> ${badge}<br>
+      <span class="muted">${esc(a.approval_id)} · task ${esc(a.task_id)} · run ${esc(a.run_id)}</span>
+      ${controls}</div>`;
+  }).join("");
+  document.querySelectorAll("button[data-a]").forEach(b => b.onclick = async () => {
+    try { await post(`/approvals/${b.dataset.a}/${b.dataset.v}`); loadApprovals(); }
+    catch (e) { $("approvals").insertAdjacentHTML("beforeend", `<div class="muted">${esc(e)}</div>`); }
+  });
+}
+
+async function loadEvents() {
+  const d = await get("/api/events");
+  $("stream").innerHTML = "";
+  d.events.slice().reverse().forEach(e => renderEvent(e));
+}
+
+function renderEvent(e) {
+  const el = document.createElement("div");
+  el.className = "ev";
+  el.innerHTML = `<span class="ts">${esc(e.timestamp)}</span>
+    <span class="t">${esc(e.event_type)}</span>
+    <span class="muted">${esc(e.run_id || "")} ${esc(e.task_id || "")}</span>`;
+  $("stream").prepend(el);
+  while ($("stream").children.length > 300) $("stream").lastChild.remove();
+  $("last-event").textContent = "last: " + e.event_type;
+}
+
+/* ---- the live authoritative stream (replay + tail) ---- */
+function connect() {
+  if (ws) { ws.onclose = null; ws.close(); }
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/events`);
+  ws.onopen = () => setConn(true);
+  ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.kind === "event") renderEvent(d); };
+  ws.onclose = () => { setConn(false); };
+}
+
+function reconstruct() {
+  Promise.all([loadIdentities(), loadNcs(), loadApprovals(), loadEvents()])
+    .then(() => { if (!ws || ws.readyState > 1) connect(); })
+    .catch(e => $("last-event").textContent = "reconstruct error: " + e);
+}
+
+/* ---- commands (authorized path only) ---- */
+$("ask-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const r = await fetch("/ask", { method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ title: $("ask-title").value }) });
+  const b = await r.json();
+  $("ask-result").innerHTML = `queued: <span class="mono">${esc(b.task_id)}</span>`;
+  $("task-id").value = b.task_id;
+  refreshTask();
+};
+
+async function refreshTask() {
+  const id = $("task-id").value.trim();
+  if (!id) return;
+  try {
+    const t = await get("/tasks/" + id);
+    $("task-status").innerHTML = `status: <strong>${esc(t.status)}</strong>
+      ${t.worker_id ? ` · worker ${esc(t.worker_id)}` : ""}`;
+  } catch (err) { $("task-status").textContent = "unknown task"; }
+}
+
+$("task-refresh").onclick = refreshTask;
+
+$("action-inspect").onclick = async () => {
+  const id = $("action-id").value.trim();
+  if (!id) return;
+  try {
+    const a = await get("/api/actions/" + id);
+    // An interrupted action (requested, no terminal) is UNKNOWN — never FAILED.
+    let badge;
+    if (a.terminal && a.outcome && a.outcome.success) badge = '<span class="badge ok">COMPLETED</span>';
+    else if (a.terminal && a.outcome) badge = '<span class="badge fail">FAILED (observed)</span>';
+    else if (a.attempted) badge = '<span class="badge unknown">ATTEMPTED / UNKNOWN</span>';
+    else badge = '<span class="badge">NO ACTION</span>';
+    $("action-result").innerHTML = `
+      <div class="kv">
+        <span class="k">action_id</span><span>${esc(a.action_id)}</span>
+        <span class="k">attempted</span><span>${a.attempted ? "YES" : "NO"}</span>
+        <span class="k">terminal</span><span>${a.terminal ? "YES" : "NO"}</span>
+        <span class="k">outcome</span><span>${badge}</span>
+      </div>
+      ${a.attempted && !a.terminal ? '<div class="item"><strong>NO TERMINAL EVENT</strong> — outcome unknown, not a failure.</div>' : ""}
+      ${a.outcome ? `<div class="item">${esc(a.outcome.capability)} · run ${esc(a.outcome.run_id)} · task ${esc(a.outcome.task_id)}
+        ${a.outcome.error ? `<br><span class="muted">error: ${esc(a.outcome.error)}</span>` : ""}</div>` : ""}`;
+  } catch (err) { $("action-result").textContent = "error: " + err; }
+};
+
+$("trace-load").onclick = async () => {
+  const id = $("run-id").value.trim();
+  if (!id) return;
+  try {
+    const t = await get("/traces/" + id);
+    $("trace").textContent = JSON.stringify(t.events, null, 2);
+  } catch (err) { $("trace").textContent = "unknown trace"; }
+};
+
+$("reconstruct").onclick = reconstruct;
+
+reconstruct();
+</script>
+</body>
+</html>

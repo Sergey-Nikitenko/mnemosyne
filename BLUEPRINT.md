@@ -530,11 +530,14 @@ gates every call, and nothing provider-shaped leaks above the adapter.*
 
 ### Phase 4 — Surface
 API (REST + WebSocket), dashboard (run view, trace tree, approval queue, *Why*
-panel), CLI. The dashboard is driven directly off the decision objects.
+panel), CLI, and the Operator Console. The dashboard is driven directly off the
+decision objects; the console is a projection-only operator view over the same
+runtime.
 
 Sequencing: 4.1 runtime composition → 4.2 REST `/ask` + status → 4.3 trace
 projection → 4.4 WebSocket event stream → 4.5 approval lifecycle → 4.6 dashboard
-→ 4.7 CLI. (Not seven commits — these are the conceptual boundaries.)
+→ 4.7 CLI → 4.8 Operator Console. (Not eight commits — these are the conceptual
+boundaries.)
 
 ### Phase 4.1 — runtime composition (the composition root)
 
@@ -707,6 +710,42 @@ independent source of truth.*
 **Phase 4.7 acceptance:** *REST, WebSocket, the dashboard, and the CLI are four
 disposable views of one execution model — they observe and command the same
 durable runtime rather than implementing parallel agent behavior.*
+
+### Phase 4.8 — the Operator Console (projection-only operator surface)
+
+    Console -> apps/console.py (create_app + read-only projections)
+             -> identities / NCS / approvals / events / action lifecycle
+
+- **The console is a projection, never a new authority.** It composes the SAME
+  `NexusRuntime` and `create_app(runtime)` the REST/WS/CLI/dashboard share, and
+  adds read-only operator projections: `GET /api/identities` (User/Agent/Model),
+  `GET /api/ncs` (the `ContinuityProjector` as-of now), `GET /api/approvals` (the
+  `approval.*` lifecycle), `GET /api/events` (the raw log), and
+  `GET /api/actions/{action_id}` (`action_attempted` + `reconstruct_action`). It
+  adds no mutation path and no phase — composition answers the question, so the
+  phase gate is respected rather than bypassed with a new phase.
+- **The hard rule is explicit.** The frontend carries, verbatim: *"The Operator
+  Console is a projection of authoritative Mnemosyne state. It may request
+  operations and display evidence; it never defines truth, authority, identity, or
+  continuity."* The only write path is the authorized one:
+  `UI -> API -> authorized path -> transition -> event -> UI updates`.
+- **An interrupted action is never a failure.** `action.requested` with no
+  terminal event projects as `attempted=true, terminal=false, outcome=null`; the
+  UI renders "NO TERMINAL EVENT / unknown / attempted", never a red FAILED badge
+  (the AD-050 projection, not a UI guess).
+- **The event stream is the center:** `WS /ws/events` replays the durable log then
+  tails live events, using the SAME serialization as `/api/events` and
+  `/traces/{run_id}` — the console holds no state of its own; a refresh or restart
+  reconstructs the identical view from authoritative state.
+- **Disposable by construction:** delete `apps/console.py` + `apps/static/` and
+  the runtime, API, WebSocket, workers, events, state, and memory all keep working.
+  `tests/conformance/test_console_surface.py` asserts the console GETs never mutate
+  the event log or the memory store.
+
+**Phase 4.8 acceptance:** *the console observes and commands the same durable
+runtime as every other surface; it projects identities, NCS, approvals, events,
+and action lifecycles read-only; an interrupted action renders attempted/unknown;
+and REST, CLI, and raw state agree on the same task status.*
 
 ### Phase 4 complete — one execution model, many disposable surfaces
 
@@ -1593,6 +1632,7 @@ The suite answers two questions: *"does Nexus work?"* (golden tasks) and
 | Approval lifecycle: durable waiting, single-use, task-bound, policy re-checked, downstream purity | `tests/golden/test_phase4_approval.py` |
 | Dashboard: disposable projection consumer — decisions/attempts/recovery/interruption, no authority | `tests/golden/test_phase4_dashboard.py` |
 | CLI: thin surface adapter — same async ask + same projected views as REST/WS/dashboard | `tests/golden/test_phase4_cli.py` |
+| Operator Console: projection-only — identities/NCS/approvals/events/action-lifecycle read-only; interrupted action is attempted/unknown, never failed; REST/CLI/raw state agree | `tests/conformance/test_console_surface.py` |
 | Atomic approval consumption: two workers race, exactly one executes (single-use) | `tests/golden/test_phase5_concurrency.py` |
 | Hardening: per-call tool identity, event-sourced approval, terminal step semantics, atomic recovery, dead-event cleanup | `tests/golden/test_phase5_hardening.py` |
 | Per-worker connections + deliberate SQLite policy (5.2): one connection per thread, busy_timeout/WAL, concurrent independent work | `tests/golden/test_phase5_connections.py` |

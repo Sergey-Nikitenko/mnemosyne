@@ -65,7 +65,7 @@ for Claude" a configuration change instead of an amnesia event.
 # Python 3.12+
 pip install -r requirements.txt
 
-# Run the entire suite (66 golden + conformance tests)
+# Run the entire suite (68 golden + conformance tests)
 python scripts/check.py
 ```
 
@@ -85,6 +85,25 @@ python tests/golden/test_phase10_federation_peer.py    # federation identity: re
 python tests/golden/test_phase10_delegation.py         # federated delegation: a bounded request, never authority
 python tests/golden/test_phase10_federated_outcome.py   # federated outcome: A records "B reported X", never "A observed X"
 ```
+
+---
+
+## Operator Console (projection-only)
+
+A Phase-4 surface (`apps/console.py` + `apps/static/console.html`), not a new
+phase: it composes the same `NexusRuntime` and projects identities, the NCS
+summary, pending approvals, the raw event log, and the action lifecycle —
+read-only, over the same events and memory store every other surface shares.
+
+> **The Operator Console is a projection of authoritative Mnemosyne state. It may
+> request operations and display evidence; it never defines truth, authority,
+> identity, or continuity.**
+
+The only write path is the authorized one (`UI → API → authorized path →
+transition → event → UI updates`). An interrupted action (`action.requested` with
+no terminal event) renders *attempted / unknown* — never a red FAILED badge.
+`tests/conformance/test_console_surface.py` proves it is projection-only and that
+REST, CLI, and raw state agree on the same authoritative task status.
 
 ---
 
