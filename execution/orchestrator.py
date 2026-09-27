@@ -22,17 +22,46 @@ The evaluator observes and judges; the orchestrator interprets the verdict.
 from __future__ import annotations
 
 import json
+import time
 
 from dataclasses import asdict, dataclass, field
 
 from core.contracts import (
-    ActionRequest, AgentIdentity, ApprovalRequest, Event, ModelIdentity,
+    ActionRequest, AgentIdentity, ApprovalRequest, Evaluation, Event, ModelIdentity,
     ModelRequest, PolicyVerdict, Run, RunManifest, Step, StepStatus, Task,
     TaskStatus, ToolCall, ToolResult, Trace, UserIdentity, new_id, utcnow,
 )
 from core.events import EventBus, EventType
 from core.state import RunState
+from execution.commitment import CostTelemetry
 from execution.instrumented import InstrumentedExecutor
+
+
+_STALL_MARKERS = (
+    "which one", "say the word", "do you want", "should i", "confirm",
+    "you pick", "tell me which", "what should i", "want me to", "say (a) or (b)",
+    "which way", "your call", "how should i",
+)
+
+
+def _is_stall(text: str) -> bool:
+    """A terminal answer that asks the OPERATOR for direction instead of acting.
+
+    Deterministic heuristic over the model's own text: only meaningful when the
+    run made NO tool calls (the orchestrator checks that first). A stall is a
+    SHORT answer that asks to be pointed at what to do — "which one?", "say (a)
+    or (b)". A long, substantive answer that merely ENDS in a question is a real
+    answer, not a stall; flagging it forces a spurious replan and the model
+    re-answers the same question repeatedly."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if len(t) >= 200:
+        return False  # substantive answer — a trailing "?" is a follow-up, not a stall
+    low = t.lower()
+    if "?" in low:
+        return True
+    return any(m in low for m in _STALL_MARKERS)
 
 
 @dataclass
@@ -101,7 +130,8 @@ class Orchestrator:
     def __init__(self, *, retriever, executor, policy, tools, evaluator,
                  bus=None, approvals=None, run_records=None, max_replans: int = 2,
                  max_tool_rounds: int = 8, continuation=None,
-                 action_runner=None, ncs_provider=None) -> None:
+                 action_runner=None, ncs_provider=None, stop_check=None,
+                 run_timeout_seconds: float = 300.0) -> None:
         self.retriever = retriever      # .search(query, filters, k) -> RetrievalResult
         self.executor = executor        # raw capability (FakeExecutor, subprocess, ...)
         self.policy = policy            # PolicyEngine (tool gating)
@@ -124,6 +154,8 @@ class Orchestrator:
         # the legacy Phase-1-policy + Phase-3-tool path runs (backward compatible).
         self.action_runner = action_runner
         self.ncs_provider = ncs_provider  # callable() -> NexusContinuityState
+        self.stop_check = stop_check  # callable(task_id) -> bool (operator interrupt)
+        self.run_timeout_seconds = run_timeout_seconds  # wall-clock bound per run
 
     def _model_identity(self) -> ModelIdentity:
         """Which logical model configuration this executor runs — a ModelIdentity
@@ -179,6 +211,33 @@ class Orchestrator:
 
         def _ncs():
             return self.ncs_provider() if self.ncs_provider else None
+
+        def should_stop():
+            return bool(self.stop_check is not None
+                        and self.stop_check.is_requested(task.task_id))
+
+        started = time.time()
+
+        def timed_out():
+            return (time.time() - started) > self.run_timeout_seconds
+
+        def stop_now(reason="stopped by operator"):
+            if self.stop_check is not None:
+                self.stop_check.clear(task.task_id)
+            state.task_status = TaskStatus.STOPPED
+            emit(EventType.RUN_STOPPED, "stopped", {"reason": reason})
+            trace.nodes.append({"type": "stop", "reason": reason})
+            return Outcome(answer="", run=run, trace=trace, live_state=state,
+                           events=list(self.bus.history), manifest=manifest)
+
+        def timeout_now():
+            state.task_status = TaskStatus.FAILED
+            emit(EventType.RUN_FAILED, "failed",
+                 {"reason": f"run wall-clock timeout after {self.run_timeout_seconds:.0f}s"})
+            trace.nodes.append({"type": "answer", "answer": "",
+                                "reason": "run wall-clock timeout"})
+            return Outcome(answer="", run=run, trace=trace, live_state=state,
+                           events=list(self.bus.history), manifest=manifest)
 
         def _legacy_call(call, spec):
             verdict = self.policy.decide_tool(spec)
@@ -291,6 +350,8 @@ class Orchestrator:
             trace.nodes.append({"type": "tool", "tool": call.tool_name, "verdict": "deny"})
             return None, False, None
 
+        telemetry = CostTelemetry()  # observe cost; never pressure the model to mutate
+
         def run_tools(tool_calls):
             results = []
             waiting = False
@@ -319,6 +380,7 @@ class Orchestrator:
                     result, waiting, pending = _legacy_call(call, spec)
                 if result is not None:
                     results.append(result)
+                    telemetry.observe(call.tool_name, result.success)
                 if waiting:
                     break
             return results, waiting, pending
@@ -387,6 +449,10 @@ class Orchestrator:
 
         while True:  # the replan loop
             attempt += 1
+            if should_stop():
+                return stop_now()
+            if timed_out():
+                return timeout_now()
             retrieved = step("retrieve", do_retrieve)
             conversation: list[dict] = []  # assistant invocations + correlated results
             tool_results: list = []        # every result across rounds, for verification
@@ -434,17 +500,16 @@ class Orchestrator:
             response = step("model", lambda: do_model(retrieved, conversation))
 
             # iteration, not autonomy: repeat the model -> tools cycle while the
-            # model keeps proposing tool calls, bounded by max_tool_rounds. A final
-            # model response (no tool calls) is NOT a tool round.
+            # model keeps proposing tool calls. HARD RULE: tool calls are NEVER
+            # capped — the loop runs until the model returns a terminal answer
+            # (no tool calls), the operator stops it, or the wall-clock timeout
+            # (a genuine resource ceiling) fires. `max_tool_rounds` is retired and
+            # must never be re-enforced.
             while response.tool_calls:
-                if rounds >= self.max_tool_rounds:
-                    reason = (f"tool-round budget exhausted after "
-                              f"{self.max_tool_rounds} round(s)")
-                    state.task_status = TaskStatus.FAILED
-                    emit(EventType.RUN_FAILED, "failed", {"reason": reason})
-                    trace.nodes.append({"type": "answer", "answer": "", "reason": reason})
-                    return Outcome(answer="", run=run, trace=trace, live_state=state,
-                                   events=list(self.bus.history), manifest=manifest)
+                if should_stop():
+                    return stop_now()
+                if timed_out():
+                    return timeout_now()
                 rounds += 1
                 results, waiting, pending_call = step(
                     "tool", lambda: run_tools(response.tool_calls))
@@ -461,6 +526,18 @@ class Orchestrator:
                 response = step("model", lambda: do_model(retrieved, conversation))
 
             evaluation = step("verify", lambda: verify(tool_results, attempt))
+
+            # Progress Obligation (serve path): a terminal answer that made no
+            # tool activity AND asks the operator for direction is a stall, not a
+            # completion. Nudge the model to act via a bounded replan.
+            if (evaluation.passed and not tool_results
+                    and _is_stall(response.content)):
+                evaluation = Evaluation(
+                    checks={**getattr(evaluation, "checks", {}), "progress": "stall"},
+                    passed=False, replan_required=True,
+                    reason="no progress: you have the tools — read the code and act; "
+                           "ask only for a genuine fork you cannot resolve by reading",
+                )
 
             if evaluation.passed:
                 answer = response.content

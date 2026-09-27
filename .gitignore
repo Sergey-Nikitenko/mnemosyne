@@ -8,3 +8,16 @@ TALKING_POINTS.md
 EXPANSION.md
 OBSERVATIONS.md
 _ops_*.py
+
+# launcher runtime state - PID files are per-machine, per-run, never source.
+.launch.pid
+.launch-current.pid
+
+# local scratch / accidental copies / one-off dev scripts (never source)
+*- Copy.md
+_tmp_*.txt
+fix.py
+scripts/probe_cmdline.py
+scripts/space_launcher.py
+scripts/tidy_launcher.py
+scripts/join_rules.py

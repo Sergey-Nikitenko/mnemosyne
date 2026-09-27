@@ -25,7 +25,7 @@ class NexusRuntime:
                  policy=None, evaluator=None, tools=None, router=None,
                  approvals=None, run_records=None, worker_id="worker-1",
                  max_replans=2, max_tool_rounds=8, continuation=None,
-                 action_runner=None, ncs_provider=None):
+                 action_runner=None, ncs_provider=None, stop_check=None):
         self.event_bus = event_bus or EventBus()
         self.policy = policy or PolicyEngine(PolicyRules())
         self.evaluator = evaluator or Evaluator()
@@ -45,7 +45,7 @@ class NexusRuntime:
             approvals=self.approvals, run_records=self.run_records,
             max_replans=max_replans, max_tool_rounds=max_tool_rounds,
             continuation=continuation, action_runner=action_runner,
-            ncs_provider=ncs_provider)
+            ncs_provider=ncs_provider, stop_check=stop_check)
         self.worker = Worker(worker_id=worker_id, queue=queue,
                              orchestrator=self.orchestrator, run_records=self.run_records)
 

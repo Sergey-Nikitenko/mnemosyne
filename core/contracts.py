@@ -36,6 +36,7 @@ class TaskStatus(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     DONE = "done"
     FAILED = "failed"
+    STOPPED = "stopped"
 
 
 class Risk(str, Enum):

@@ -40,6 +40,9 @@ from execution.durable import DurableEventBus
 from execution.fake import FakeExecutor
 from execution.filesystem import FilesystemToolExecutor
 from execution.queue import TaskQueue
+from execution.selectable import SelectableModel
+from execution.selectable_dir import SelectableProjectDir
+from execution.stop_signal import StopSignal
 from integrations.deepseek import DeepseekModel
 from integrations.gemini import GeminiModel
 from federation.outcome import FederatedOutcomeRecorder
@@ -52,6 +55,8 @@ from memory.continuity import ContinuityProjector
 from memory.memory import MemoryStore
 from apps.console import create_console_app
 from apps.runtime import NexusRuntime
+from capability.executor import CapabilityToolExecutor
+from capability.gate_view import GateView
 
 
 @dataclass(frozen=True)
@@ -196,22 +201,56 @@ class CompositionRoot:
                                    risk=t.risk, parameters=t.parameters)
                         for t in config.tools]
 
-        # execution — the model backend + the bounded tool executor, composed
-        # behind ONE Executor protocol. The real backend is more capable than the
-        # fake; it is NOT more authoritative (policy/authority still gates, the
-        # tool executor still enforces the project boundary).
-        if config.model_backend in ("deepseek", "gemini"):
+        # execution — a selectable reasoning backend + the bounded tool executor,
+        # composed behind ONE Executor protocol. The real backend is more capable
+        # than the fake; it is NOT more authoritative (policy/authority still
+        # gates, the tool executor still enforces the project boundary). The
+        # SelectableModel lets the operator choose a backend at runtime; the
+        # orchestrator never knows which one is serving.
+        project_dir_selector = None
+        gate_view = GateView(config.tools, policy)
+        if config.project_dir:
+            project_dir_selector = SelectableProjectDir(
+                config.project_dir,
+                selection_file=(os.path.join(config.workspace, "project-dir.json")
+                                if config.workspace else None))
+            # EXPERIMENTAL capability layer wrapped AROUND the bounded executor:
+            # the trusted core (execution/) never imports capability; this wrapper
+            # adds the read-only context tools on top. Remove it and only the
+            # context tools disappear — every other semantic is intact.
+            tool_exec = CapabilityToolExecutor(
+                project_dir_selector, root_provider=project_dir_selector.refresh,
+                events_provider=lambda: bus.load_events(),
+                capabilities_provider=lambda: [t.name for t in tools.list()],
+                specs_provider=lambda: tools.list(),
+                state_dir=(os.path.join(config.workspace, "capability-state")
+                           if config.workspace else None),
+                gate_view=gate_view)
+        else:
+            tool_exec = FakeExecutor()
+        selectable_models = {
+            "fake": (FakeExecutor(model_script=list(config.model_script)),
+                     {"provider": "deterministic", "family": "fake", "version": "1"}),
+        }
+        active_model = "fake"
+        if config.model_backend in ("deepseek", "gemini") and config.model_api_key_file:
             model_cls = DeepseekModel if config.model_backend == "deepseek" else GeminiModel
-            model_exec = model_cls(
+            real_model = model_cls(
                 api_key_file=config.model_api_key_file,
                 model=config.model_name,
                 tools=_tool_schemas(config.tools))
-            tool_exec = (FilesystemToolExecutor(config.project_dir)
-                         if config.project_dir else FakeExecutor())
-            executor = CompositeExecutor(model_exec, tool_exec,
-                                         model_identity=config.model)
-        else:
-            executor = FakeExecutor(model_script=list(config.model_script))
+            selectable_models[config.model_name] = (
+                real_model,
+                {"provider": "cloud",
+                 "family": config.model.family or config.model_backend,
+                 "version": config.model.version or "1"})
+            active_model = config.model_name
+        selection_file = (os.path.join(config.workspace, "model-selection.json")
+                          if config.workspace else None)
+        model_exec = SelectableModel(selectable_models, active=active_model,
+                                     selection_file=selection_file)
+        executor = CompositeExecutor(model_exec, tool_exec,
+                                     model_identity=config.model)
         # agency (authority decides; runner executes — never a bypass)
         authority = ContinuityAuthority(capabilities, policy)
         runner = ActionRunner(authority, executor, bus)
@@ -223,13 +262,16 @@ class CompositionRoot:
             return projector.project(utcnow(), memory, user=config.user,
                                      agent=config.agent, model=config.model)
 
+        stop_signal = StopSignal(config.workspace)
+
         runtime = NexusRuntime(retriever=retriever, executor=executor, queue=queue,
                                event_bus=bus, tools=tools, approvals=approvals,
                                policy=policy, worker_id=config.worker_id,
                                max_replans=config.max_replans,
                                max_tool_rounds=config.max_tool_rounds,
                                continuation=continuation,
-                               action_runner=runner, ncs_provider=ncs_provider)
+                               action_runner=runner, ncs_provider=ncs_provider,
+                               stop_check=stop_signal)
 
         # learning (analyze -> authority -> adapt; the only write path)
         analyzer = EvidenceAnalyzer()
@@ -243,7 +285,10 @@ class CompositionRoot:
         # the Operator Console observes the SAME runtime/event/memory world
         console_app = create_console_app(
             runtime, memory_store=memory, user=config.user, agent=config.agent,
-            model=config.model, projector=projector)
+            model=config.model, projector=projector, models=model_exec,
+            project_dir=config.project_dir, workspace=config.workspace,
+            project_dir_selector=project_dir_selector,
+            stop_signal=stop_signal)
 
         return MnemosyneSystem(
             config=config, runtime=runtime, bus=bus, queue=queue, approvals=approvals,

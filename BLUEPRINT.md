@@ -1810,3 +1810,25 @@ A principle without a test is not a principle — it is an intention.
 A conformance test exists only because there is an architectural property to
 preserve — never because a code pattern "feels nicer." The suite is a map of
 intent, not a second linter.
+
+## Capability Layer (EXPERIMENTAL — added post-freeze)
+
+A second plane above the trusted core. It **PROPOSES**; the trusted core **DECIDES**.
+
+```
+capability/  (EXPERIMENTAL)  -- Context Reasons, Evidence Bundles, Context Tiers,
+                               Context Router, Hot Working Context, Change Context,
+                               Decision Context, Context Packet, Context Compiler,
+                               environment intelligence.
+        │  proposes
+        ▼
+Trusted Core (core/ control/ execution/ apps/)  -- Authority, Freshness, Provenance,
+                               Policy, Stop/Revocation, Obligations, Verification truth,
+                               Event truth.
+```
+
+- **Law:** convenience may be speculative; authority may not. A wrong capability selection is
+  recoverable; a speculative decision about staleness, authority, stop, or verification is not.
+- The EXPERIMENTAL layer is deliberately *outside* the conformance suite until a mechanism earns
+  promotion (three observations that execution depends on it). It is instrumented, not asserted.
+- Deleting any `capability/` module leaves every Mnemosyne semantic intact.

@@ -47,6 +47,7 @@ class EventType(str):
     RUN_REPLANNED = "run.replanned"
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
+    RUN_STOPPED = "run.stopped"
     # Phase 8 (agency): an authorized logical action's lifecycle. requested is
     # emitted BEFORE the side effect can occur (AD-050); the terminal events
     # record only observed completion or failure.

@@ -45,12 +45,16 @@ class InstrumentedExecutor:
 
     def execute_tool(self, call: ToolCall) -> ToolResult:
         # event BEFORE the step can be considered complete (and before it even runs)
+        # carries BOTH the physical call_id and the model's correlation_id, so one
+        # id (correlation_id, which _agency_call also uses as action_id) traverses
+        # call -> action -> result in the durable log (unified action identity).
         self._emit(EventType.TOOL_REQUESTED, "running",
-                   {"tool": call.tool_name, "arguments": call.arguments, "call_id": call.call_id})
+                   {"tool": call.tool_name, "arguments": call.arguments,
+                    "call_id": call.call_id, "correlation_id": call.correlation_id})
         result = self.inner.execute_tool(call)
         self._emit(EventType.TOOL_COMPLETED, "success" if result.success else "failed",
                    {"tool": call.tool_name, "success": result.success, "error": result.error,
-                    "call_id": call.call_id})
+                    "call_id": call.call_id, "correlation_id": call.correlation_id})
         return result
 
     def run_model(self, request: ModelRequest) -> ModelResponse:
@@ -61,7 +65,20 @@ class InstrumentedExecutor:
                    {"request_id": request_id, "messages": len(request.messages),
                     "max_tokens": request.max_tokens})
         response = self.inner.run_model(request)
+        # The model's declared output is an observed fact (report before observation):
+        # content + tool calls + token/latency telemetry, never private chain-of-thought.
+        # `model` is the display name; `model_key` is the STABLE identity key used
+        # for continuity (so a provider-reported name change can't silently break
+        # the model's line).
+        mi = getattr(self.inner, "model_identity", None)
+        model_key = getattr(mi, "key", None) or response.model
         self._emit(EventType.MODEL_COMPLETED, "success" if response.success else "failed",
                    {"request_id": request_id, "model": response.model,
+                    "model_key": model_key,
+                    "content": response.content,
+                    "tool_calls": [tc.tool_name for tc in (response.tool_calls or [])],
+                    "tokens_in": getattr(response, "tokens_in", 0),
+                    "tokens_out": getattr(response, "tokens_out", 0),
+                    "latency_ms": getattr(response, "latency_ms", 0),
                     "success": response.success, "error": response.error})
         return response

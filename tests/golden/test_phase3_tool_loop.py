@@ -1,13 +1,14 @@
-"""Phase 3.x golden task — bounded multi-round tool loop (WORK-001-OBS-04).
+"""Phase 3.x golden task — multi-round tool loop (WORK-001-OBS-04).
 
 A real model performs multi-step work: inspect, read, write, test. The orchestrator
-must repeat the model -> tools -> model cycle until the model returns a terminal
-answer (content with no tool calls), bounded by a Nexus-owned `max_tool_rounds`
-budget. The model may request another round; it never decides iteration is unbounded.
+repeats the model -> tools -> model cycle until the model returns a terminal
+answer (content with no tool calls). HARD RULE: tool calls are NEVER capped — the
+loop runs until the model stops proposing tools (or the operator stops it, or the
+wall-clock timeout fires). `max_tool_rounds` is retired and must never be re-enforced.
 
 This test proves the loop executes multiple rounds in order, evaluates only after
-the terminal model turn, and that a model perpetually requesting another tool stops
-(and fails explicitly) when the budget is exhausted.
+the terminal model turn, and that a model that keeps proposing tools is NEVER cut
+off by a tool-round budget — it terminates only when it stops proposing tools.
 
 Run:  py tests/golden/test_phase3_tool_loop.py
 """
@@ -91,26 +92,28 @@ def main():
           "the terminal answer is the run's answer")
     bus.close(); queue.close()
 
-    # -- the bound: a model that always requests another tool stops at the budget --
+    # -- the hard rule: tool calls are NEVER capped. A model that always requests
+    #    another tool runs ALL of them; the loop ends only when the model stops
+    #    proposing tools (here: the scripted model exhausts its 10 rounds and the
+    #    executor returns a terminal echo). max_tool_rounds=3 is IGNORED.
     tmp2 = tempfile.mkdtemp()
     adversarial = [ModelResponse(model="fake", content="", success=True, tool_calls=[
         ToolCall(tool_name="list_dir", arguments={"path": "."}, correlation_id=f"call_{i}")])
         for i in range(10)]
     runtime2, bus2, queue2 = build_runtime(tmp2, adversarial, max_tool_rounds=3)
-    task2 = runtime2.ask("loop forever")
+    task2 = runtime2.ask("keep proposing tools")
     runtime2.run_one()
     evs2 = runtime2.events(task_id=task2)
     tool_requests = [e for e in evs2 if e.event_type == EventType.TOOL_REQUESTED]
-    check(len(tool_requests) == 3, "exactly 3 tool rounds execute (the budget)")
-    check(any(e.event_type == EventType.RUN_FAILED
-              and "budget" in (e.payload.get("reason") or "") for e in evs2),
-          "budget exhaustion fails explicitly (never masquerades as success)")
-    check(not any(e.event_type == EventType.RUN_COMPLETED for e in evs2),
-          "a perpetually-tool-calling model never reaches a successful run.completed")
+    check(len(tool_requests) == 10, "all 10 scripted tool rounds execute — no cap (max_tool_rounds=3 is ignored)")
+    check(not any("budget" in (e.payload.get("reason") or "") for e in evs2),
+          "no budget-exhaustion failure is fabricated")
+    check(any(e.event_type == EventType.RUN_COMPLETED for e in evs2),
+          "the run completes when the model stops proposing tools")
     bus2.close(); queue2.close()
 
-    print("\nPASS: the model->tools cycle repeats in order and is bounded; "
-          "the model may request another round, it never decides iteration is unbounded.")
+    print("\nPASS: the model->tools cycle repeats in order, is NEVER capped, and "
+          "terminates only when the model stops proposing tools.")
 
 
 if __name__ == "__main__":
